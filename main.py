@@ -103,6 +103,13 @@ async def on_ready():
         print(f"Sync error: {e}")
 
 
+@bot.tree.command(name="getuseravatar", description="Получить аватар пользователя")
+async def getavatar(interaction: discord.Interaction, member: discord.Member):
+    embed = discord.Embed(title=f"Аватар {member.name}", color=discord.Color.blue())
+    embed.set_image(url=member.display_avatar.url)
+    
+    await interaction.response.send_message(embed=embed)
+
 @bot.tree.command(name="ping", description="Check ping")
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message(f"Pong: `{round(bot.latency * 1000)}ms`")
@@ -122,3 +129,6 @@ async def adminsecurity(interaction: discord.Interaction):
 
     await interaction.response.send_modal(AdminAuthModal())
 
+
+
+bot.run("Your Token :)")
