@@ -1,7 +1,8 @@
 import discord
 from discord.ext import commands
 from discord import ui
-
+import random
+from discord import app_commands
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -109,7 +110,7 @@ async def getavatar(interaction: discord.Interaction, member: discord.Member):
     embed.set_image(url=member.display_avatar.url)
     
     await interaction.response.send_message(embed=embed)
-
+    
 @bot.tree.command(name="ping", description="Check ping")
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message(f"Pong: `{round(bot.latency * 1000)}ms`")
@@ -129,6 +130,53 @@ async def adminsecurity(interaction: discord.Interaction):
 
     await interaction.response.send_modal(AdminAuthModal())
 
+@bot.tree.command(name="roll", description="Random Number!")
+async def randomnum(interaction: discord.Interaction):
+    rnum = random.randint(1, 90)
+    await interaction.response.send_message(f"**Твоё рандомное число:** {rnum}")
 
+@bot.tree.command(name="debug_info", description="DEBUG INFO ABOUT SERVER..")
+@app_commands.checks.has_permissions(administrator=True)
+async def debuginfo(interaction: discord.Interaction):
+    guild = interaction.guild 
+    
+    bot_count = sum(1 for member in guild.members if member.bot)
+    human_count = guild.member_count - bot_count
 
-bot.run("Your Token :)")
+    await interaction.response.send_message(
+        f"`[🛠️]` **DEBUG PANEL** `[🛠️]`\n"
+        f"👑 **Владелец:** {guild.owner}\n"
+        f"👥 **Всего участников:** {guild.member_count}\n"
+        f"👤 **Людей:** {human_count}\n"
+        f"🤖 **Ботов:** {bot_count}\n"
+        f"📅 **Дата создания:** {guild.created_at.strftime('%d.%m.%Y')}\n"
+        f"🆔 **ID сервера:** {guild.id}"
+    )
+
+@debuginfo.error
+async def debuginfo_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("❌ У вас недостаточно прав для этой команды!", ephemeral=True)
+
+@bot.tree.command(name="work", description="Выйти на работу и получить зарплату")
+@app_commands.checks.cooldown(1, 3600) # 1 раз в 3600 секунд (1 час)
+async def work(interaction: discord.Interaction):
+    salary = random.randint(50, 250)
+    
+    jobs = ["Поваром", "Пожарным", "Программистом", "Охранником," "Президентом", "Гражданином Чехословакии", "Главой Евро-Коммисии"]
+    job = random.choice(jobs)
+    
+    await interaction.response.send_message(
+        f"👷 Ты поработал **{job}** и получил: `{salary}`₵"
+    )
+
+@work.error
+async def work_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CommandOnCooldown):
+        minutes = round(error.retry_after / 60)
+        await interaction.response.send_message(
+            f"⏳ Ты слишком устал! Приходи через **{minutes} мин.**", 
+            ephemeral=True
+        )
+
+bot.run("Your Token here :З")
