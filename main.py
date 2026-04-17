@@ -348,7 +348,7 @@ async def adminsecurity(interaction: discord.Interaction):
     has_access_role = any(role.id == ADMIN_ACCESS_ROLE_ID for role in interaction.user.roles)
 
     if not has_access_role:
-        await interaction.response.send_message("❌ У вас нет доступа к этой команде.", ephemeral=True)
+        await interaction.response.send_message("[❌] У вас нет доступа к этой команде.", ephemeral=True)
         return
 
     await interaction.response.send_modal(AdminAuthModal())
