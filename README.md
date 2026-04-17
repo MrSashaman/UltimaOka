@@ -1,2 +1,2 @@
 # UltimaOka
-UltimaOka - Discord Bot
+## Multifunctional Discord Bot. Economy, Moderation, Fun, Security!
