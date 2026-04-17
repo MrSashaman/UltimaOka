@@ -1,8 +1,11 @@
+import os
+import random
+import asyncio
 import discord
 from discord.ext import commands
-from discord import ui
-import random
-from discord import app_commands
+from discord import ui, app_commands
+from database import Database
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -11,8 +14,10 @@ intents.guilds = True
 ADMIN_ACCESS_ROLE_ID = 1494183239110361119
 VERIFIED_ADMIN_ROLE_ID = 1494182462538911774
 BLACKLIST_ROLE_ID = 1494187832468836434
+LOG_CHANNEL_ID = 1494191515583381536
 ADMIN_PASSWORD = "root"
 
+db = Database()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
@@ -47,7 +52,7 @@ class AdminAuthModal(ui.Modal, title="Подтверждение админ-пр
 
             try:
                 await member.add_roles(verified_role, reason="Успешная admin security верификация")
-                await interaction.response.send_message(f"✅**Пароль принят**. Роль защиты выдана: `{member}`!", ephemeral=True)
+                await interaction.response.send_message(f"✅ **Пароль принят**. Роль защиты выдана: `{member}`!", ephemeral=True)
             except discord.Forbidden:
                 await interaction.response.send_message("❌ Бот не может выдать роль. Проверь права и иерархию ролей.", ephemeral=True)
             except Exception as e:
@@ -64,7 +69,7 @@ class AdminAuthModal(ui.Modal, title="Подтверждение админ-пр
         try:
             if removable_roles:
                 await member.remove_roles(*removable_roles, reason="Неверный пароль admin security")
-            LOG_CHANNEL_ID = 1494191515583381536  
+
             log_channel = guild.get_channel(LOG_CHANNEL_ID)
 
             if log_channel:
@@ -75,7 +80,6 @@ class AdminAuthModal(ui.Modal, title="Подтверждение админ-пр
                 )
                 embed.add_field(name="Действие", value="Сняты все доступные роли и выдан ЧС.")
                 embed.set_footer(text=f"ID: {member.id}")
-                
                 await log_channel.send(embed=embed)
 
             if blacklist_role is None:
@@ -108,9 +112,9 @@ async def on_ready():
 async def getavatar(interaction: discord.Interaction, member: discord.Member):
     embed = discord.Embed(title=f"Аватар {member.name}", color=discord.Color.blue())
     embed.set_image(url=member.display_avatar.url)
-    
     await interaction.response.send_message(embed=embed)
-    
+
+
 @bot.tree.command(name="ping", description="Check ping")
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message(f"Pong: `{round(bot.latency * 1000)}ms`")
@@ -119,27 +123,33 @@ async def ping(interaction: discord.Interaction):
 @bot.tree.command(name="adminsecurity", description="Подтверждение админ-прав")
 async def adminsecurity(interaction: discord.Interaction):
     if not interaction.guild or not isinstance(interaction.user, discord.Member):
-        await interaction.response.send_message("❌ `Команда доступна только на сервере.`", ephemeral=True)
+        await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
         return
 
     has_access_role = any(role.id == ADMIN_ACCESS_ROLE_ID for role in interaction.user.roles)
 
     if not has_access_role:
-        await interaction.response.send_message("❌ `У вас нет доступа к этой команде.`", ephemeral=True)
+        await interaction.response.send_message("❌ У вас нет доступа к этой команде.", ephemeral=True)
         return
 
     await interaction.response.send_modal(AdminAuthModal())
+
 
 @bot.tree.command(name="roll", description="Random Number!")
 async def randomnum(interaction: discord.Interaction):
     rnum = random.randint(1, 90)
     await interaction.response.send_message(f"**Твоё рандомное число:** {rnum}")
 
+
 @bot.tree.command(name="debug_info", description="DEBUG INFO ABOUT SERVER..")
 @app_commands.checks.has_permissions(administrator=True)
 async def debuginfo(interaction: discord.Interaction):
-    guild = interaction.guild 
-    
+    guild = interaction.guild
+
+    if guild is None:
+        await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+        return
+
     bot_count = sum(1 for member in guild.members if member.bot)
     human_count = guild.member_count - bot_count
 
@@ -153,30 +163,55 @@ async def debuginfo(interaction: discord.Interaction):
         f"🆔 **ID сервера:** {guild.id}"
     )
 
+
 @debuginfo.error
 async def debuginfo_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.MissingPermissions):
-        await interaction.response.send_message("❌ У вас недостаточно прав для этой команды!", ephemeral=True)
+        if interaction.response.is_done():
+            await interaction.followup.send("❌ У вас недостаточно прав для этой команды!", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ У вас недостаточно прав для этой команды!", ephemeral=True)
+
 
 @bot.tree.command(name="work", description="Выйти на работу и получить зарплату")
-@app_commands.checks.cooldown(1, 3600) # 1 раз в 3600 секунд (1 час)
+@app_commands.checks.cooldown(1, 3600)
 async def work(interaction: discord.Interaction):
     salary = random.randint(50, 250)
-    
-    jobs = ["Поваром", "Пожарным", "Программистом", "Охранником," "Президентом", "Гражданином Чехословакии", "Главой Евро-Коммисии"]
+    jobs = ["Поваром", "Пожарным", "Программистом", "Охранником", "Президентом", "Гражданином Чехословакии", "Главой Евро-Коммисии"]
     job = random.choice(jobs)
-    
+
+    await asyncio.to_thread(db.add_balance, interaction.user.id, salary)
+    balance_value = await asyncio.to_thread(db.get_balance, interaction.user.id)
+
     await interaction.response.send_message(
-        f"👷 Ты поработал **{job}** и получил: `{salary}`₵"
+        f"👷 Ты поработал **{job}** и получил: `{salary}`₵\n"
     )
+
 
 @work.error
 async def work_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.CommandOnCooldown):
         minutes = round(error.retry_after / 60)
-        await interaction.response.send_message(
-            f"⏳ Ты слишком устал! Приходи через **{minutes} мин.**", 
-            ephemeral=True
-        )
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                f"⏳ Ты слишком устал! Приходи через **{minutes} мин.**",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"⏳ Ты слишком устал! Приходи через **{minutes} мин.**",
+                ephemeral=True
+            )
 
-bot.run("Your Token here :З")
+
+@bot.tree.command(name="balance", description="Посмотреть баланс")
+async def balance(interaction: discord.Interaction, member: discord.Member | None = None):
+    target = member or interaction.user
+    await asyncio.to_thread(db.ensure_user, target.id)
+    user_balance = await asyncio.to_thread(db.get_balance, target.id)
+
+    await interaction.response.send_message(
+        f"💳 Баланс пользователя **{target.display_name}**: `{user_balance}`₵"
+    )
+
+bot.run("Your Token :)") # Change bot Token!!!
