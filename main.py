@@ -1,6 +1,9 @@
 import os
 import random
 import asyncio
+import sqlite3
+from datetime import datetime, timedelta, timezone
+
 import discord
 from discord.ext import commands
 from discord import ui, app_commands
@@ -15,10 +18,179 @@ ADMIN_ACCESS_ROLE_ID = 1494183239110361119
 VERIFIED_ADMIN_ROLE_ID = 1494182462538911774
 BLACKLIST_ROLE_ID = 1494187832468836434
 LOG_CHANNEL_ID = 1494191515583381536
+MUTE_ROLE_ID = 1494838413659213825  
 ADMIN_PASSWORD = "root"
 
 db = Database()
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+MOD_DB_PATH = "moderation.db"
+
+
+
+def init_mod_db():
+    conn = sqlite3.connect(MOD_DB_PATH)
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mod_cases (
+            case_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            target_user_id INTEGER NOT NULL,
+            moderator_id INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            duration TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS warnings (
+            warn_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            moderator_id INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def create_mod_case(guild_id: int, action: str, target_user_id: int, moderator_id: int, reason: str, duration: str | None = None):
+    conn = sqlite3.connect(MOD_DB_PATH)
+    cur = conn.cursor()
+    created_at = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M:%S UTC")
+
+    cur.execute("""
+        INSERT INTO mod_cases (guild_id, action, target_user_id, moderator_id, reason, duration, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (guild_id, action, target_user_id, moderator_id, reason, duration, created_at))
+
+    case_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return case_id, created_at
+
+
+def add_warning_db(guild_id: int, user_id: int, moderator_id: int, reason: str):
+    conn = sqlite3.connect(MOD_DB_PATH)
+    cur = conn.cursor()
+    created_at = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M:%S UTC")
+
+    cur.execute("""
+        INSERT INTO warnings (guild_id, user_id, moderator_id, reason, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (guild_id, user_id, moderator_id, reason, created_at))
+
+    warn_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return warn_id, created_at
+
+
+def get_user_warnings(guild_id: int, user_id: int):
+    conn = sqlite3.connect(MOD_DB_PATH)
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT warn_id, moderator_id, reason, created_at
+        FROM warnings
+        WHERE guild_id = ? AND user_id = ?
+        ORDER BY warn_id DESC
+    """, (guild_id, user_id))
+
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+
+def format_duration(days: int = 0, hours: int = 0, minutes: int = 0):
+    parts = []
+    if days > 0:
+        parts.append(f"{days}д")
+    if hours > 0:
+        parts.append(f"{hours}ч")
+    if minutes > 0:
+        parts.append(f"{minutes}м")
+    return " ".join(parts) if parts else "Не указано"
+
+
+def parse_timeout_delta(days: int = 0, hours: int = 0, minutes: int = 0):
+    return timedelta(days=days, hours=hours, minutes=minutes)
+
+
+async def send_mod_log(
+    guild: discord.Guild,
+    action: str,
+    moderator: discord.Member | discord.User,
+    target: discord.Member | discord.User,
+    reason: str,
+    case_id: int,
+    created_at: str,
+    duration: str | None = None
+):
+    log_channel = guild.get_channel(LOG_CHANNEL_ID)
+    if log_channel is None:
+        return
+
+    colors = {
+        "BAN": discord.Color.red(),
+        "MUTE": discord.Color.orange(),
+        "UNMUTE": discord.Color.green(),
+        "WARN": discord.Color.gold(),
+        "TIMEOUT": discord.Color.dark_orange(),
+        "UNBAN": discord.Color.green(),
+    }
+
+    embed = discord.Embed(
+        title=f"Модерация | {action}",
+        color=colors.get(action.upper(), discord.Color.blurple()),
+        timestamp=datetime.now(timezone.utc)
+    )
+
+    embed.add_field(name="Модератор", value=f"{moderator} \n`{moderator.id}`", inline=False)
+    embed.add_field(name="Пользователь", value=f"{target} \n`{target.id}`", inline=False)
+    embed.add_field(name="Причина", value=reason, inline=False)
+    embed.add_field(name="ID наказания", value=f"`{case_id}`", inline=True)
+    embed.add_field(name="ID пользователя", value=f"`{target.id}`", inline=True)
+    embed.add_field(name="ID модератора", value=f"`{moderator.id}`", inline=True)
+
+    if duration:
+        embed.add_field(name="Время", value=duration, inline=False)
+
+    embed.set_footer(text=f"Создано: {created_at}")
+
+    await log_channel.send(embed=embed)
+
+
+async def can_moderate(interaction: discord.Interaction, target: discord.Member):
+    if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+        return False
+
+    if target == interaction.user:
+        await interaction.response.send_message("❌ Нельзя использовать эту команду на себе.", ephemeral=True)
+        return False
+
+    if target == interaction.guild.owner:
+        await interaction.response.send_message("❌ Нельзя наказать владельца сервера.", ephemeral=True)
+        return False
+
+    if target.top_role >= interaction.user.top_role and interaction.user != interaction.guild.owner:
+        await interaction.response.send_message("❌ Этот пользователь выше или равен вам по роли.", ephemeral=True)
+        return False
+
+    if interaction.guild.me and target.top_role >= interaction.guild.me.top_role:
+        await interaction.response.send_message("❌ Роль пользователя выше или равна роли бота.", ephemeral=True)
+        return False
+
+    return True
+
 
 
 class AdminAuthModal(ui.Modal, title="Подтверждение админ-прав."):
@@ -98,14 +270,23 @@ class AdminAuthModal(ui.Modal, title="Подтверждение админ-пр
             await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
 
 
+
 @bot.event
 async def on_ready():
+    init_mod_db()
     try:
         synced = await bot.tree.sync()
         print(f"Logged in as {bot.user}")
         print(f"Synced {len(synced)} commands")
     except Exception as e:
         print(f"Sync error: {e}")
+    while True:
+        await bot.change_presence(status=discord.Status.online, 
+                                  activity=discord.Game("Hello everyone :)"))
+        await asyncio.sleep(15)
+
+
+
 
 
 @bot.tree.command(name="getuseravatar", description="Получить аватар пользователя")
@@ -114,10 +295,11 @@ async def getavatar(interaction: discord.Interaction, member: discord.Member):
     embed.set_image(url=member.display_avatar.url)
     await interaction.response.send_message(embed=embed)
 
+
 @bot.tree.command(name="luckybet", description="Сделать ставку")
 async def luckybet(interaction: discord.Interaction):
     balance_value = await asyncio.to_thread(db.get_balance, interaction.user.id)
-    
+
     await interaction.response.send_message(f"`[🎩]` Введите сумму ставки:")
 
     def check(m):
@@ -125,32 +307,32 @@ async def luckybet(interaction: discord.Interaction):
 
     try:
         msg = await bot.wait_for('message', check=check, timeout=30.0)
-        
+
         if not msg.content.isdigit():
             return await interaction.followup.send("[🚫] Ошибка: введите числовое значение.")
-        
+
         amount = int(msg.content)
 
         if amount > balance_value:
             return await interaction.followup.send("[🚫] Недостаточно денег.")
-        
+
         if amount <= 0:
             return await interaction.followup.send("[🚫] Ставка должна быть больше 0.")
 
-        await asyncio.to_thread(db.add_balance, interaction.user.id, -amount) 
-        
+        await asyncio.to_thread(db.add_balance, interaction.user.id, -amount)
 
         random_chance = random.randint(40, 100)
-        
-        if random_chance <= 60: 
+
+        if random_chance <= 60:
             await interaction.followup.send(f"❌ Ты проиграл свои **{amount}**!")
-        else: 
+        else:
             win_amount = amount * 2
-            await asyncio.to_thread(db.add_balance, interaction.user.id, win_amount) 
+            await asyncio.to_thread(db.add_balance, interaction.user.id, win_amount)
             await interaction.followup.send(f"🍷 Ты победил! Получаешь **{win_amount}**!")
 
     except asyncio.TimeoutError:
         await interaction.followup.send("`[⏰]` Время вышло.")
+
 
 @bot.tree.command(name="ping", description="Check ping")
 async def ping(interaction: discord.Interaction):
@@ -218,7 +400,6 @@ async def work(interaction: discord.Interaction):
     job = random.choice(jobs)
 
     await asyncio.to_thread(db.add_balance, interaction.user.id, salary)
-    balance_value = await asyncio.to_thread(db.get_balance, interaction.user.id)
 
     await interaction.response.send_message(
         f"👷 Ты поработал **{job}** и получил: `{salary}`₵\n"
@@ -251,18 +432,19 @@ async def balance(interaction: discord.Interaction, member: discord.Member | Non
         f"💳 Баланс пользователя **{target.display_name}**: `{user_balance}`₵"
     )
 
+
 @bot.tree.command(name="bonus", description="Бонус")
 @app_commands.checks.cooldown(1, 3600)
 async def freebonus(interaction: discord.Interaction):
-    
     user_id = interaction.user.id
     bonus = 100
     await asyncio.to_thread(db.ensure_user, user_id)
-    user_balance = await asyncio.to_thread(db.get_balance, user_id)
-    await asyncio.to_thread(db.add_balance, user_id, bonus) 
+    await asyncio.to_thread(db.add_balance, user_id, bonus)
+
     await interaction.response.send_message(
         f"🏆 {interaction.user.mention}, вы получили бонус в размере: {bonus} ₵"
     )
+
 
 @freebonus.error
 async def freebonus_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -279,4 +461,357 @@ async def freebonus_error(interaction: discord.Interaction, error: app_commands.
                 ephemeral=True
             )
 
-bot.run("token")
+
+
+@bot.tree.command(name="ban", description="Забанить пользователя")
+@app_commands.checks.has_permissions(ban_members=True)
+async def ban_user(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str = "Причина не указана"
+):
+    if not await can_moderate(interaction, member):
+        return
+
+    try:
+        case_id, created_at = create_mod_case(
+            interaction.guild.id,
+            "BAN",
+            member.id,
+            interaction.user.id,
+            reason
+        )
+
+        await member.ban(reason=f"{reason} | Модератор: {interaction.user} | Case ID: {case_id}")
+
+        await interaction.response.send_message(
+            f"✅ Пользователь **{member}** забанен.\n"
+            f"Причина: **{reason}**\n"
+            f"ID наказания: `{case_id}`"
+        )
+
+        await send_mod_log(
+            interaction.guild,
+            "BAN",
+            interaction.user,
+            member,
+            reason,
+            case_id,
+            created_at
+        )
+
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ Бот не может забанить этого пользователя.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="unban", description="Разбанить пользователя по ID")
+@app_commands.checks.has_permissions(ban_members=True)
+async def unban_user(
+    interaction: discord.Interaction,
+    user_id: str,
+    reason: str = "Причина не указана"
+):
+    if interaction.guild is None:
+        await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+        return
+
+    try:
+        user_id_int = int(user_id)
+        user = await bot.fetch_user(user_id_int)
+
+        case_id, created_at = create_mod_case(
+            interaction.guild.id,
+            "UNBAN",
+            user.id,
+            interaction.user.id,
+            reason
+        )
+
+        await interaction.guild.unban(user, reason=f"{reason} | Модератор: {interaction.user} | Case ID: {case_id}")
+
+        await interaction.response.send_message(
+            f"✅ Пользователь **{user}** разбанен.\n"
+            f"Причина: **{reason}**\n"
+            f"ID наказания: `{case_id}`"
+        )
+
+        await send_mod_log(
+            interaction.guild,
+            "UNBAN",
+            interaction.user,
+            user,
+            reason,
+            case_id,
+            created_at
+        )
+
+    except ValueError:
+        await interaction.response.send_message("❌ ID пользователя должен быть числом.", ephemeral=True)
+    except discord.NotFound:
+        await interaction.response.send_message("❌ Пользователь не найден в бан-листе.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ Бот не может разбанить пользователя.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="mute", description="Выдать мут пользователю")
+@app_commands.checks.has_permissions(manage_roles=True)
+async def mute_user(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str = "Причина не указана"
+):
+    if not await can_moderate(interaction, member):
+        return
+
+    mute_role = interaction.guild.get_role(MUTE_ROLE_ID)
+    if mute_role is None:
+        await interaction.response.send_message("❌ MUTE_ROLE_ID указан неверно или роль не найдена.", ephemeral=True)
+        return
+
+    if interaction.guild.me and mute_role >= interaction.guild.me.top_role:
+        await interaction.response.send_message("❌ Роль мута выше или равна роли бота.", ephemeral=True)
+        return
+
+    try:
+        case_id, created_at = create_mod_case(
+            interaction.guild.id,
+            "MUTE",
+            member.id,
+            interaction.user.id,
+            reason
+        )
+
+        await member.add_roles(mute_role, reason=f"{reason} | Модератор: {interaction.user} | Case ID: {case_id}")
+
+        await interaction.response.send_message(
+            f"✅ Пользователь **{member}** получил мут.\n"
+            f"Причина: **{reason}**\n"
+            f"ID наказания: `{case_id}`"
+        )
+
+        await send_mod_log(
+            interaction.guild,
+            "MUTE",
+            interaction.user,
+            member,
+            reason,
+            case_id,
+            created_at
+        )
+
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ Бот не может выдать мут.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="unmute", description="Снять мут с пользователя")
+@app_commands.checks.has_permissions(manage_roles=True)
+async def unmute_user(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str = "Причина не указана"
+):
+    if interaction.guild is None:
+        await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+        return
+
+    mute_role = interaction.guild.get_role(MUTE_ROLE_ID)
+    if mute_role is None:
+        await interaction.response.send_message("❌ MUTE_ROLE_ID указан неверно или роль не найдена.", ephemeral=True)
+        return
+
+    try:
+        case_id, created_at = create_mod_case(
+            interaction.guild.id,
+            "UNMUTE",
+            member.id,
+            interaction.user.id,
+            reason
+        )
+
+        await member.remove_roles(mute_role, reason=f"{reason} | Модератор: {interaction.user} | Case ID: {case_id}")
+
+        await interaction.response.send_message(
+            f"✅ С пользователя **{member}** снят мут.\n"
+            f"Причина: **{reason}**\n"
+            f"ID наказания: `{case_id}`"
+        )
+
+        await send_mod_log(
+            interaction.guild,
+            "UNMUTE",
+            interaction.user,
+            member,
+            reason,
+            case_id,
+            created_at
+        )
+
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ Бот не может снять мут.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="warn", description="Выдать предупреждение")
+@app_commands.checks.has_permissions(moderate_members=True)
+async def warn_user(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str = "Причина не указана"
+):
+    if not await can_moderate(interaction, member):
+        return
+
+    try:
+        warn_id, created_at = add_warning_db(
+            interaction.guild.id,
+            member.id,
+            interaction.user.id,
+            reason
+        )
+
+        case_id, _ = create_mod_case(
+            interaction.guild.id,
+            "WARN",
+            member.id,
+            interaction.user.id,
+            reason
+        )
+
+        warnings_count = len(get_user_warnings(interaction.guild.id, member.id))
+
+        await interaction.response.send_message(
+            f"✅ Пользователь **{member}** получил предупреждение.\n"
+            f"Причина: **{reason}**\n"
+            f"Всего предупреждений: **{warnings_count}**\n"
+            f"ID наказания: `{case_id}`\n"
+            f"ID предупреждения: `{warn_id}`"
+        )
+
+        await send_mod_log(
+            interaction.guild,
+            "WARN",
+            interaction.user,
+            member,
+            reason,
+            case_id,
+            created_at
+        )
+
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="warnings", description="Посмотреть предупреждения пользователя")
+@app_commands.checks.has_permissions(moderate_members=True)
+async def warnings_user(
+    interaction: discord.Interaction,
+    member: discord.Member
+):
+    if interaction.guild is None:
+        await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+        return
+
+    warns = get_user_warnings(interaction.guild.id, member.id)
+
+    if not warns:
+        await interaction.response.send_message(f"У пользователя **{member}** нет предупреждений.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title=f"Предупреждения | {member}",
+        color=discord.Color.gold()
+    )
+
+    for warn_id, moderator_id, reason, created_at in warns[:10]:
+        embed.add_field(
+            name=f"Warn ID: {warn_id}",
+            value=(
+                f"**Модератор ID:** `{moderator_id}`\n"
+                f"**Причина:** {reason}\n"
+                f"**Дата:** {created_at}"
+            ),
+            inline=False
+        )
+
+    embed.set_footer(text=f"Всего предупреждений: {len(warns)}")
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="timeout", description="Выдать таймаут пользователю")
+@app_commands.checks.has_permissions(moderate_members=True)
+async def timeout_user(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    minutes: app_commands.Range[int, 1, 40320],
+    reason: str = "Причина не указана"
+):
+    if not await can_moderate(interaction, member):
+        return
+
+    try:
+        until = discord.utils.utcnow() + timedelta(minutes=minutes)
+        duration_text = f"{minutes} мин."
+
+        case_id, created_at = create_mod_case(
+            interaction.guild.id,
+            "TIMEOUT",
+            member.id,
+            interaction.user.id,
+            reason,
+            duration_text
+        )
+
+        await member.timeout(until, reason=f"{reason} | Модератор: {interaction.user} | Case ID: {case_id}")
+
+        await interaction.response.send_message(
+            f"✅ Пользователь **{member}** получил таймаут на **{minutes} мин.**\n"
+            f"Причина: **{reason}**\n"
+            f"ID наказания: `{case_id}`"
+        )
+
+        await send_mod_log(
+            interaction.guild,
+            "TIMEOUT",
+            interaction.user,
+            member,
+            reason,
+            case_id,
+            created_at,
+            duration_text
+        )
+
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ Бот не может выдать таймаут.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
+
+
+
+@ban_user.error
+@unban_user.error
+@mute_user.error
+@unmute_user.error
+@warn_user.error
+@warnings_user.error
+@timeout_user.error
+async def mod_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        text = "❌ У вас недостаточно прав для этой команды."
+    else:
+        text = f"❌ Ошибка команды: {error}"
+
+    if interaction.response.is_done():
+        await interaction.followup.send(text, ephemeral=True)
+    else:
+        await interaction.response.send_message(text, ephemeral=True)
+
+
+bot.run("TOKEN")
