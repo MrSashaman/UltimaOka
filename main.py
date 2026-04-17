@@ -3,7 +3,7 @@ import random
 import asyncio
 import sqlite3
 from datetime import datetime, timedelta, timezone
-
+import SI
 import discord
 from discord.ext import commands
 from discord import ui, app_commands
@@ -14,12 +14,7 @@ intents.message_content = True
 intents.members = True
 intents.guilds = True
 
-ADMIN_ACCESS_ROLE_ID = 1494183239110361119
-VERIFIED_ADMIN_ROLE_ID = 1494182462538911774
-BLACKLIST_ROLE_ID = 1494187832468836434
-LOG_CHANNEL_ID = 1494191515583381536
-MUTE_ROLE_ID = 1494838413659213825  
-ADMIN_PASSWORD = "root"
+
 
 db = Database()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -134,7 +129,7 @@ async def send_mod_log(
     created_at: str,
     duration: str | None = None
 ):
-    log_channel = guild.get_channel(LOG_CHANNEL_ID)
+    log_channel = guild.get_channel(SI.LOG_CHANNEL_ID)
     if log_channel is None:
         return
 
@@ -210,10 +205,10 @@ class AdminAuthModal(ui.Modal, title="Подтверждение админ-пр
         guild = interaction.guild
         bot_member = guild.me
 
-        verified_role = guild.get_role(VERIFIED_ADMIN_ROLE_ID)
-        blacklist_role = guild.get_role(BLACKLIST_ROLE_ID)
+        verified_role = guild.get_role(SI.VERIFIED_ADMIN_ROLE_ID)
+        blacklist_role = guild.get_role(SI.BLACKLIST_ROLE_ID)
 
-        if self.password_input.value == ADMIN_PASSWORD:
+        if self.password_input.value == SI.ADMIN_PASSWORD:
             if verified_role is None:
                 await interaction.response.send_message("❌ Роль верификации не найдена.", ephemeral=True)
                 return
@@ -242,7 +237,7 @@ class AdminAuthModal(ui.Modal, title="Подтверждение админ-пр
             if removable_roles:
                 await member.remove_roles(*removable_roles, reason="Неверный пароль admin security")
 
-            log_channel = guild.get_channel(LOG_CHANNEL_ID)
+            log_channel = guild.get_channel(SI.LOG_CHANNEL_ID)
 
             if log_channel:
                 embed = discord.Embed(
@@ -345,7 +340,7 @@ async def adminsecurity(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
         return
 
-    has_access_role = any(role.id == ADMIN_ACCESS_ROLE_ID for role in interaction.user.roles)
+    has_access_role = any(role.id == SI.ADMIN_ACCESS_ROLE_ID for role in interaction.user.roles)
 
     if not has_access_role:
         await interaction.response.send_message("[❌] У вас нет доступа к этой команде.", ephemeral=True)
@@ -567,7 +562,7 @@ async def mute_user(
     if not await can_moderate(interaction, member):
         return
 
-    mute_role = interaction.guild.get_role(MUTE_ROLE_ID)
+    mute_role = interaction.guild.get_role(SI.MUTE_ROLE_ID)
     if mute_role is None:
         await interaction.response.send_message("❌ MUTE_ROLE_ID указан неверно или роль не найдена.", ephemeral=True)
         return
@@ -620,7 +615,7 @@ async def unmute_user(
         await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
         return
 
-    mute_role = interaction.guild.get_role(MUTE_ROLE_ID)
+    mute_role = interaction.guild.get_role(SI.MUTE_ROLE_ID)
     if mute_role is None:
         await interaction.response.send_message("❌ MUTE_ROLE_ID указан неверно или роль не найдена.", ephemeral=True)
         return
@@ -814,4 +809,4 @@ async def mod_command_error(interaction: discord.Interaction, error: app_command
         await interaction.response.send_message(text, ephemeral=True)
 
 
-bot.run("TOKEN")
+bot.run(SI.TOKEN)
