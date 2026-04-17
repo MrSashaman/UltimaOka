@@ -251,5 +251,32 @@ async def balance(interaction: discord.Interaction, member: discord.Member | Non
         f"💳 Баланс пользователя **{target.display_name}**: `{user_balance}`₵"
     )
 
+@bot.tree.command(name="bonus", description="Бонус")
+@app_commands.checks.cooldown(1, 3600)
+async def freebonus(interaction: discord.Interaction):
+    
+    user_id = interaction.user.id
+    bonus = 100
+    await asyncio.to_thread(db.ensure_user, user_id)
+    user_balance = await asyncio.to_thread(db.get_balance, user_id)
+    await asyncio.to_thread(db.add_balance, user_id, bonus) 
+    await interaction.response.send_message(
+        f"🏆 {interaction.user.mention}, вы получили бонус в размере: {bonus} ₵"
+    )
 
-bot.run("TOKEN")
+@freebonus.error
+async def freebonus_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CommandOnCooldown):
+        minutes = round(error.retry_after / 60)
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                f"⏳ Ты уже получал свой бонус! Приходи через **{minutes} мин.**",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"⏳ Ты уже получал свой бонус! Приходи через **{minutes} мин.**",
+                ephemeral=True
+            )
+
+bot.run("token")
