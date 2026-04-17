@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Dashboard</title>
+    <link rel="stylesheet" href="css\styles.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <aside class="sidebar">
+            <h2>Bot Panel</h2>
+            <nav>
+                <ul>
+                    <li><a href="#" class="active">Dashboard</a></li>
+                    <li><a href="#">Analytics</a></li>
+                    <li><a href="#">Users</a></li>
+                    <li><a href="#">Settings</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-header">
+                <h1>Welcome Back, Admin</h1>
+                <div class="user-profile">Profile</div>
+            </header>
+
+
+
+            <section class="stats-grid">
+                <div class="card"><h3>Total bot users</h3><p>0</p></div>
+                <div class="card"><h3>Active Users</h3><p>0</p></div>
+                <div class="card"><h3>Servers</h3><p>1</p></div>
+            </section>
+
+            <button class="btn-primary" id="myButton">Начать</button>
+            <p id="message"></p>
+        </main>
+    </div>
+    <script src="dashboard.js"></script>
+</body>
+</html>

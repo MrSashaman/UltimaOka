@@ -114,6 +114,43 @@ async def getavatar(interaction: discord.Interaction, member: discord.Member):
     embed.set_image(url=member.display_avatar.url)
     await interaction.response.send_message(embed=embed)
 
+@bot.tree.command(name="luckybet", description="Сделать ставку")
+async def luckybet(interaction: discord.Interaction):
+    balance_value = await asyncio.to_thread(db.get_balance, interaction.user.id)
+    
+    await interaction.response.send_message(f"`[🎩]` Введите сумму ставки:")
+
+    def check(m):
+        return m.author == interaction.user and m.channel == interaction.channel
+
+    try:
+        msg = await bot.wait_for('message', check=check, timeout=30.0)
+        
+        if not msg.content.isdigit():
+            return await interaction.followup.send("[🚫] Ошибка: введите числовое значение.")
+        
+        amount = int(msg.content)
+
+        if amount > balance_value:
+            return await interaction.followup.send("[🚫] Недостаточно денег.")
+        
+        if amount <= 0:
+            return await interaction.followup.send("[🚫] Ставка должна быть больше 0.")
+
+        await asyncio.to_thread(db.add_balance, interaction.user.id, -amount) 
+        
+
+        random_chance = random.randint(40, 100)
+        
+        if random_chance <= 60: 
+            await interaction.followup.send(f"❌ Ты проиграл свои **{amount}**!")
+        else: 
+            win_amount = amount * 2
+            await asyncio.to_thread(db.add_balance, interaction.user.id, win_amount) 
+            await interaction.followup.send(f"🍷 Ты победил! Получаешь **{win_amount}**!")
+
+    except asyncio.TimeoutError:
+        await interaction.followup.send("`[⏰]` Время вышло.")
 
 @bot.tree.command(name="ping", description="Check ping")
 async def ping(interaction: discord.Interaction):
@@ -214,4 +251,5 @@ async def balance(interaction: discord.Interaction, member: discord.Member | Non
         f"💳 Баланс пользователя **{target.display_name}**: `{user_balance}`₵"
     )
 
-bot.run("Your Token :)") # Change bot Token!!!
+
+bot.run("TOKEN")

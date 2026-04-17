@@ -1,0 +1,83 @@
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: sans-serif; }
+
+.dashboard-container {
+    display: flex;
+    min-height: 100vh;
+}
+
+/* Sidebar Styling */
+.sidebar {
+    width: 250px;
+    background: #2c3e50;
+    color: white;
+    padding: 20px;
+}
+.sidebar h2 { margin-bottom: 30px; }
+.sidebar ul { list-style: none; }
+.sidebar li a { 
+    color: #bdc3c7; 
+    text-decoration: none; 
+    display: block; 
+    padding: 10px 0; 
+}
+.sidebar li a.active { color: white; font-weight: bold; }
+
+/* Main Content Area */
+.main-content {
+    flex-grow: 1;
+    background: #f4f7f6;
+    padding: 20px;
+}
+
+.top-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 30px;
+}
+
+/* Responsive Grid for Stats */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+.card {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    text-align: center;
+}
+
+
+/* Стильная кнопка для дашборда */
+.btn-primary {
+    background: linear-gradient(135deg, #3498db, #2980b9);
+    color: white;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease; /* Плавность всех изменений */
+    box-shadow: 0 4px 6px rgba(52, 152, 219, 0.2);
+    outline: none;
+}
+
+.btn-primary:hover {
+    background: linear-gradient(135deg, #2980b9, #3498db);
+    transform: translateY(-2px); /* Кнопка слегка приподнимается */
+    box-shadow: 0 6px 12px rgba(52, 152, 219, 0.3);
+}
+
+.btn-primary:active {
+    transform: translateY(0); /* Возвращается на место */
+    box-shadow: 0 2px 4px rgba(52, 152, 219, 0.2);
+}
+
+.btn-block {
+    width: 100%;
+    margin-top: 15px;
+}
