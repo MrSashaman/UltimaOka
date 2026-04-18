@@ -1,4 +1,5 @@
 import os
+from discord.ext import tasks, commands
 import random
 import asyncio
 import sqlite3
@@ -8,6 +9,7 @@ import discord
 from discord.ext import commands
 from discord import ui, app_commands
 from database import Database
+import botstatus
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -19,7 +21,10 @@ intents.guilds = True
 db = Database()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+
+
 MOD_DB_PATH = "moderation.db"
+
 
 
 
@@ -265,9 +270,25 @@ class AdminAuthModal(ui.Modal, title="Подтверждение админ-пр
             await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
 
 
+@tasks.loop(seconds=20)
+async def change_status():
+    global custom_text
+    
+    if custom_text is not None:
+        return 
+
+    random_item = random.choice(botstatus.botstatuses)
+    await bot.change_presence(
+        status=discord.Status.online, 
+        activity=discord.Game(name=random_item)
+    )
+
+
+
 
 @bot.event
 async def on_ready():
+    change_status.start()
     init_mod_db()
     try:
         synced = await bot.tree.sync()
@@ -275,13 +296,30 @@ async def on_ready():
         print(f"Synced {len(synced)} commands")
     except Exception as e:
         print(f"Sync error: {e}")
-    while True:
-        await bot.change_presence(status=discord.Status.online, 
-                                  activity=discord.Game("Hello everyone :)"))
-        await asyncio.sleep(15)
+
+        
 
 
 
+
+
+@bot.tree.command(name="setcustomstatus", description="Установить кастомный статус бота")
+@app_commands.checks.has_permissions(administrator=True)
+async def customstatusbot(interaction: discord.Interaction, text: str): 
+    global custom_text
+    
+    if text.lower() == "сброс":
+        custom_text = None
+        await interaction.response.send_message("✅ Кастомный статус сброшен. Возвращаюсь к рандому.", ephemeral=True)
+    else:
+        custom_text = text
+        await bot.change_presence(activity=discord.Game(name=text))
+        await interaction.response.send_message(f"✅ Статус изменен на: **{text}**", ephemeral=True)
+
+@customstatusbot.error
+async def customstatusbot_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("❌ У вас недостаточно прав!", ephemeral=True)
 
 
 @bot.tree.command(name="getuseravatar", description="Получить аватар пользователя")
