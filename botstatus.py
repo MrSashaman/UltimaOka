@@ -1,0 +1,1 @@
+botstatuses = ["Moderation", "Economy", "Security", "Fun", "FreeDom"]
