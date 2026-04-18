@@ -78,6 +78,14 @@
 }
 
 .btn-block {
+
+    display: flex;
+    justify-content: center; /* Горизонталь */
+    align-items: center;     /* Вертикаль */
+    height: 100vh;  
     width: 100%;
-    margin-top: 15px;
+;
+
+
+
 }

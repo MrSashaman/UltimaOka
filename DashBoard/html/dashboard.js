@@ -9,3 +9,12 @@ btn.addEventListener('click', function() {
     
     alert("В РАЗРАБОТКЕ");
 });
+
+    function updateUsers() {
+        const count = Math.floor(Math.random() * 5);
+        document.getElementById('RandomNum').innerText = count.toLocaleString(); 
+    }
+
+    setInterval(updateUsers, 5000);
+
+    updateUsers();
