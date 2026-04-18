@@ -22,6 +22,7 @@ db = Database()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
+custom_text = None
 
 MOD_DB_PATH = "moderation.db"
 
@@ -273,29 +274,53 @@ class AdminAuthModal(ui.Modal, title="Подтверждение админ-пр
 @tasks.loop(seconds=20)
 async def change_status():
     global custom_text
-    
-    if custom_text is not None:
-        return 
 
-    random_item = random.choice(botstatus.botstatuses)
-    await bot.change_presence(
-        status=discord.Status.online, 
-        activity=discord.Game(name=random_item)
-    )
+    try:
+        if custom_text:
+            await bot.change_presence(
+                status=discord.Status.online,
+                activity=discord.Game(name=custom_text)
+            )
+            return
+
+        statuses = getattr(botstatus, "botstatuses", None)
+        if not statuses or not isinstance(statuses, (list, tuple)):
+            print("[STATUS] Список статусов пустой или неверный.")
+            return
+
+        await bot.change_presence(
+            status=discord.Status.online,
+            activity=discord.Game(name=random.choice(statuses))
+        )
+
+    except Exception as e:
+        print(f"[STATUS ERROR] {e}")
+
+@change_status.before_loop
+async def before_change_status():
+    await bot.wait_until_ready()
+
+@change_status.error
+async def change_status_error(error):
+    print(f"[STATUS LOOP FATAL ERROR] {error}")
 
 
 
 
 @bot.event
 async def on_ready():
-    change_status.start()
     init_mod_db()
+
+    if not change_status.is_running():
+        change_status.start()
+
     try:
         synced = await bot.tree.sync()
         print(f"Logged in as {bot.user}")
         print(f"Synced {len(synced)} commands")
     except Exception as e:
         print(f"Sync error: {e}")
+
 
         
 
@@ -305,16 +330,26 @@ async def on_ready():
 
 @bot.tree.command(name="setcustomstatus", description="Установить кастомный статус бота")
 @app_commands.checks.has_permissions(administrator=True)
-async def customstatusbot(interaction: discord.Interaction, text: str): 
+async def customstatusbot(interaction: discord.Interaction, text: str):
     global custom_text
-    
+
     if text.lower() == "сброс":
         custom_text = None
-        await interaction.response.send_message("✅ Кастомный статус сброшен. Возвращаюсь к рандому.", ephemeral=True)
-    else:
-        custom_text = text
-        await bot.change_presence(activity=discord.Game(name=text))
-        await interaction.response.send_message(f"✅ Статус изменен на: **{text}**", ephemeral=True)
+        await interaction.response.send_message(
+            "✅ Кастомный статус сброшен. Возвращаюсь к рандомным статусам.",
+            ephemeral=True
+        )
+        return
+
+    custom_text = text
+    await bot.change_presence(
+        status=discord.Status.online,
+        activity=discord.Game(name=text)
+    )
+    await interaction.response.send_message(
+        f"✅ Статус изменен на: **{text}**",
+        ephemeral=True
+    )
 
 @customstatusbot.error
 async def customstatusbot_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -390,7 +425,7 @@ async def adminsecurity(interaction: discord.Interaction):
 @bot.tree.command(name="roll", description="Random Number!")
 async def randomnum(interaction: discord.Interaction):
     rnum = random.randint(1, 90)
-    await interaction.response.send_message(f"**Твоё рандомное число:** {rnum}")
+    await interaction.response.send_message(f"** Твоё рандомное число:** {rnum}")
 
 
 @bot.tree.command(name="debug_info", description="DEBUG INFO ABOUT SERVER..")
