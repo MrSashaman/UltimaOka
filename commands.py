@@ -68,8 +68,12 @@ def setup_commands(bot, db):
 
         await interaction.response.send_modal(AdminAuthModal())
 
+    gif_list = ["https://media0.giphy.com/media/a5viI92PAF89q/giphy.gif", "https://tenor.com/ecUoBs2k3YQ.gif", "https://tenor.com/bTTKG.gif"]
 
-
+    @bot.tree.command(name="gif", description="random gif")
+    async def rgif(interaction: discord.Interaction):
+        await interaction.response.send_message(random.choice(gif_list))
+        
     @bot.tree.command(name="ping", description="Check ping")
     async def ping(interaction: discord.Interaction):
         await interaction.response.send_message(f"Pong: `{round(bot.latency * 1000)}ms`")
@@ -552,6 +556,7 @@ def setup_commands(bot, db):
 
         except Exception as e:
             await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
+
 
     @bot.tree.command(name="warnings", description="Посмотреть предупреждения пользователя")
     @app_commands.checks.has_permissions(moderate_members=True)
