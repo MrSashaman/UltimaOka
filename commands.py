@@ -1,7 +1,7 @@
 import asyncio
 import random
 from datetime import timedelta
-
+from discord import app_commands, ui
 import SI
 import discord
 from discord import app_commands
@@ -209,45 +209,198 @@ def setup_commands(bot, db):
                     ephemeral=True
                 )
 
-    @bot.tree.command(name="luckybet", description="Сделать ставку")
-    async def luckybet(interaction: discord.Interaction):
-        balance_value = await asyncio.to_thread(db.get_balance, interaction.user.id)
+    LUCKYBET_WIN_CHANCE = 45 
+    LUCKYBET_MULTIPLIER = 2 
+    SPIN_GIF = "https://tenor.com/n6VvWbS02In.gif"
+    WIN_GIF = "https://tenor.com/sgKHCPWX1eH.gif"
+    LOSE_GIF = "https://media1.tenor.com/m/EmCutI9qdgYAAAAC/oh-damn-i%E2%80%99m-lost.gif"
 
-        await interaction.response.send_message("`[🎩]` Введите сумму ставки:")
 
-        def check(m: discord.Message):
-            return m.author == interaction.user and m.channel == interaction.channel
+    def format_money(amount: int) -> str:
+        return f"{amount:,}".replace(",", " ")
 
-        try:
-            msg = await bot.wait_for("message", check=check, timeout=30.0)
 
-            if not msg.content.isdigit():
-                await interaction.followup.send("[🚫] Ошибка: введите числовое значение.")
+    def build_spin_embed(user: discord.User, amount: int, reels: str, stage_text: str) -> discord.Embed:
+        embed = discord.Embed(
+            title="🎰 LuckyBet",
+            description=(
+                f"**Игрок:** {user.mention}\n"
+                f"**Ставка:** `{format_money(amount)}`\n\n"
+                f"## {reels}\n\n"
+                f"**{stage_text}**"
+            ),
+            color=discord.Color.gold()
+        )
+        embed.set_footer(text="Удача решает всё...")
+        if SPIN_GIF:
+            embed.set_image(url=SPIN_GIF)
+        return embed
+
+
+    def build_result_embed(user: discord.User, amount: int, won: bool, payout: int = 0, balance: int = 0) -> discord.Embed:
+        if won:
+            embed = discord.Embed(
+                title="🎉 Победа!",
+                description=(
+                    f"**Игрок:** {user.mention}\n"
+                    f"**Ставка:** `{format_money(amount)}`\n"
+                    f"**Выигрыш:** `{format_money(payout)}`\n"
+                    f"**Новый баланс:** `{format_money(balance)}`\n\n"
+                    f"🎰 Автомат остановился на выигрышной комбинации!"
+                ),
+                color=discord.Color.green()
+            )
+            if WIN_GIF:
+                embed.set_image(url=WIN_GIF)
+        else:
+            embed = discord.Embed(
+                title="💀 Проигрыш",
+                description=(
+                    f"**Игрок:** {user.mention}\n"
+                    f"**Ставка:** `{format_money(amount)}`\n"
+                    f"**Потеряно:** `{format_money(amount)}`\n"
+                    f"**Новый баланс:** `{format_money(balance)}`\n\n"
+                    f"🎰 На этот раз удача была не на твоей стороне."
+                ),
+                color=discord.Color.red()
+            )
+            if LOSE_GIF:
+                embed.set_image(url=LOSE_GIF)
+
+        embed.set_footer(text="Нажми кнопку ниже, чтобы сыграть ещё раз")
+        return embed
+
+
+    class LuckyBetRepeatView(discord.ui.View):
+        def __init__(self, author_id: int):
+            super().__init__(timeout=120)
+            self.author_id = author_id
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id != self.author_id:
+                await interaction.response.send_message(
+                    "❌ Эта кнопка доступна только тому, кто сделал ставку.",
+                    ephemeral=True
+                )
+                return False
+            return True
+
+        @discord.ui.button(label="Повторить ставку", emoji="🎲", style=discord.ButtonStyle.success)
+        async def repeat_bet(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.send_modal(LuckyBetModal())
+
+        async def on_timeout(self):
+            for item in self.children:
+                item.disabled = True
+
+
+    class LuckyBetModal(ui.Modal, title="LuckyBet - ставка"):
+        amount = ui.TextInput(
+            label="Введите сумму ставки",
+            placeholder="Например: 500",
+            required=True,
+            max_length=12
+        )
+
+        async def on_submit(self, interaction: discord.Interaction):
+            if not self.amount.value.isdigit():
+                await interaction.response.send_message(
+                    "🚫 Ошибка: введите только числовую сумму.",
+                    ephemeral=True
+                )
                 return
 
-            amount = int(msg.content)
-
-            if amount > balance_value:
-                await interaction.followup.send("[🚫] Недостаточно денег.")
-                return
+            amount = int(self.amount.value)
 
             if amount <= 0:
-                await interaction.followup.send("[🚫] Ставка должна быть больше 0.")
+                await interaction.response.send_message(
+                    "🚫 Ставка должна быть больше 0.",
+                    ephemeral=True
+                )
+                return
+
+            balance_value = await asyncio.to_thread(db.get_balance, interaction.user.id)
+
+            if amount > balance_value:
+                await interaction.response.send_message(
+                    f"🚫 Недостаточно денег. Твой баланс: `{format_money(balance_value)}`",
+                    ephemeral=True
+                )
                 return
 
             await asyncio.to_thread(db.add_balance, interaction.user.id, -amount)
 
-            random_chance = random.randint(40, 100)
+            reels_frames = [
+                "🍒 | 💎 | 7️⃣",
+                "💎 | 🍒 | 🎲",
+                "7️⃣ | 💰 | 🍒",
+                "🍀 | 7️⃣ | 💎",
+                "💰 | 🍒 | 7️⃣",
+            ]
 
-            if random_chance <= 60:
-                await interaction.followup.send(f"❌ Ты проиграл свои **{amount}**!")
+            await interaction.response.send_message(
+                embed=build_spin_embed(
+                    interaction.user,
+                    amount,
+                    random.choice(reels_frames),
+                    "Барабаны начинают крутиться..."
+                )
+            )
+
+            msg = await interaction.original_response()
+
+            for stage_text in [
+                "Прокрутка...",
+                "Скорость растёт...",
+                "Ещё немного...",
+                "Останавливаем барабаны..."
+            ]:
+                await asyncio.sleep(0.9)
+                await msg.edit(
+                    embed=build_spin_embed(
+                        interaction.user,
+                        amount,
+                        random.choice(reels_frames),
+                        stage_text
+                    )
+                )
+
+            await asyncio.sleep(0.8)
+
+            won = random.randint(1, 100) <= LUCKYBET_WIN_CHANCE
+
+            if won:
+                payout = amount * LUCKYBET_MULTIPLIER
+                await asyncio.to_thread(db.add_balance, interaction.user.id, payout)
+                new_balance = await asyncio.to_thread(db.get_balance, interaction.user.id)
+
+                await msg.edit(
+                    embed=build_result_embed(
+                        interaction.user,
+                        amount,
+                        won=True,
+                        payout=payout,
+                        balance=new_balance
+                    ),
+                    view=LuckyBetRepeatView(interaction.user.id)
+                )
             else:
-                win_amount = amount * 2
-                await asyncio.to_thread(db.add_balance, interaction.user.id, win_amount)
-                await interaction.followup.send(f"🍷 Ты победил! Получаешь **{win_amount}**!")
+                new_balance = await asyncio.to_thread(db.get_balance, interaction.user.id)
 
-        except asyncio.TimeoutError:
-            await interaction.followup.send("`[⏰]` Время вышло.")
+                await msg.edit(
+                    embed=build_result_embed(
+                        interaction.user,
+                        amount,
+                        won=False,
+                        balance=new_balance
+                    ),
+                    view=LuckyBetRepeatView(interaction.user.id)
+                )
+
+
+    @bot.tree.command(name="luckybet", description="Сделать ставку")
+    async def luckybet(interaction: discord.Interaction):
+        await interaction.response.send_modal(LuckyBetModal())
 
 
 
