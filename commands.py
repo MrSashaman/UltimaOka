@@ -402,6 +402,14 @@ def setup_commands(bot, db):
     async def luckybet(interaction: discord.Interaction):
         await interaction.response.send_modal(LuckyBetModal())
 
+    @bot.tree.command(name="randomfact", description="Рандомный факт")
+    async def randomfact(interaction: discord.Interaction):
+        randomfactlist = [
+            "В 1952 году Эйнштейну предлагали стать президентом Израиля.", 
+            "Каждый пятый россиянин, по данным ВОЗ, умирает от алкоголя."
+        ]
+        rndfact = random.choice(randomfactlist)
+        await interaction.response.send_message(f"{rndfact}")
 
 
     @bot.tree.command(name="ban", description="Забанить пользователя")
