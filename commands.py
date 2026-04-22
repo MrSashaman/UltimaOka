@@ -822,6 +822,295 @@ def setup_commands(bot, db):
         except Exception as e:
             await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
 
+
+
+#Профиль и прочая хрень
+
+
+    profile_group = app_commands.Group(name="profile", description="Профиль пользователя")
+
+    def build_profile_embed(member: discord.abc.User, profile: dict) -> discord.Embed:
+        gender_map = {
+            None: "Не указан",
+            "male": "Мужской",
+            "female": "Женский",
+            "other": "Другое"
+        }
+
+        gender_text = gender_map.get(profile["gender"], "Не указан")
+        age_text = str(profile["age"]) if profile["age"] is not None else "Не указан"
+        about_text = profile["about"] if profile["about"] else "Не указано"
+        events_text = "Включены" if profile["event_ping"] else "Выключены"
+
+        embed = discord.Embed(
+            title=f"Профиль {member.display_name}",
+            color=discord.Color.blurple()
+        )
+        embed.add_field(name="Пол", value=gender_text, inline=True)
+        embed.add_field(name="Возраст", value=age_text, inline=True)
+        embed.add_field(name="Ивенты", value=events_text, inline=True)
+        embed.add_field(name="О себе", value=about_text, inline=False)
+        embed.add_field(name="Баланс", value=f"{profile['balance']}₵", inline=True)
+
+        if hasattr(member, "display_avatar"):
+            embed.set_thumbnail(url=member.display_avatar.url)
+
+        return embed
+
+
+    class ProfileAboutModal(ui.Modal, title="Изменить описание"):
+        about = ui.TextInput(
+            label="О себе",
+            placeholder="Напиши немного о себе",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            max_length=300
+        )
+
+        async def on_submit(self, interaction: discord.Interaction):
+            text = self.about.value.strip()
+
+            if text == "":
+                await asyncio.to_thread(db.clear_about, interaction.user.id)
+                await interaction.response.send_message(
+                    "✅ Описание профиля очищено.",
+                    ephemeral=True
+                )
+                return
+
+            await asyncio.to_thread(db.set_about, interaction.user.id, text)
+            await interaction.response.send_message(
+                "✅ Описание профиля обновлено.",
+                ephemeral=True
+            )
+
+
+    class ProfileAgeModal(ui.Modal, title="Указать возраст"):
+        age = ui.TextInput(
+            label="Возраст",
+            placeholder="Например: 16",
+            required=True,
+            max_length=2
+        )
+
+        async def on_submit(self, interaction: discord.Interaction):
+            value = self.age.value.strip()
+
+            if not value.isdigit():
+                await interaction.response.send_message(
+                    "❌ Возраст должен быть числом.",
+                    ephemeral=True
+                )
+                return
+
+            age = int(value)
+
+            if age < 10 or age > 99:
+                await interaction.response.send_message(
+                    "❌ Возраст должен быть от 10 до 99.",
+                    ephemeral=True
+                )
+                return
+
+            await asyncio.to_thread(db.set_age, interaction.user.id, age)
+            await interaction.response.send_message(
+                f"✅ Возраст обновлён: **{age}**",
+                ephemeral=True
+            )
+
+
+    class ProfileGenderSelect(ui.Select):
+        def __init__(self):
+            options = [
+                discord.SelectOption(label="Мужской", value="male"),
+                discord.SelectOption(label="Женский", value="female"),
+                discord.SelectOption(label="Другое", value="other"),
+                discord.SelectOption(label="Очистить", value="clear")
+            ]
+            super().__init__(
+                placeholder="Выбери пол",
+                min_values=1,
+                max_values=1,
+                options=options
+            )
+
+        async def callback(self, interaction: discord.Interaction):
+            value = self.values[0]
+
+            if value == "clear":
+                await asyncio.to_thread(db.clear_gender, interaction.user.id)
+                await interaction.response.send_message(
+                    "✅ Пол в профиле очищен.",
+                    ephemeral=True
+                )
+                return
+
+            await asyncio.to_thread(db.set_gender, interaction.user.id, value)
+
+            gender_names = {
+                "male": "Мужской",
+                "female": "Женский",
+                "other": "Другое"
+            }
+
+            await interaction.response.send_message(
+                f"✅ Пол обновлён: **{gender_names[value]}**",
+                ephemeral=True
+            )
+
+
+    class ProfileGenderView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=120)
+            self.add_item(ProfileGenderSelect())
+
+
+    class ProfileEditView(discord.ui.View):
+        def __init__(self, author_id: int):
+            super().__init__(timeout=180)
+            self.author_id = author_id
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id != self.author_id:
+                await interaction.response.send_message(
+                    "❌ Это меню доступно только автору команды.",
+                    ephemeral=True
+                )
+                return False
+            return True
+
+        @discord.ui.button(label="Пол", style=discord.ButtonStyle.primary)
+        async def set_gender_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.send_message(
+                "Выбери пол:",
+                view=ProfileGenderView(),
+                ephemeral=True
+            )
+
+        @discord.ui.button(label="Возраст", style=discord.ButtonStyle.primary)
+        async def set_age_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.send_modal(ProfileAgeModal())
+
+        @discord.ui.button(label="О себе", style=discord.ButtonStyle.secondary)
+        async def set_about_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.send_modal(ProfileAboutModal())
+
+        @discord.ui.button(label="Ивенты", style=discord.ButtonStyle.success)
+        async def toggle_events_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            profile = await asyncio.to_thread(db.get_profile, interaction.user.id)
+            new_value = not bool(profile["event_ping"])
+
+            await asyncio.to_thread(db.set_event_ping, interaction.user.id, new_value)
+
+            text = "✅ Уведомления об ивентах включены." if new_value else "✅ Уведомления об ивентах выключены."
+            await interaction.response.send_message(text, ephemeral=True)
+
+
+    @profile_group.command(name="view", description="Посмотреть профиль")
+    async def profile_view(interaction: discord.Interaction, member: discord.Member | None = None):
+        target = member or interaction.user
+        await asyncio.to_thread(db.ensure_user, target.id)
+        profile = await asyncio.to_thread(db.get_profile, target.id)
+
+        await interaction.response.send_message(
+            embed=build_profile_embed(target, profile)
+        )
+
+
+    @profile_group.command(name="edit", description="Редактировать свой профиль")
+    async def profile_edit(interaction: discord.Interaction):
+        await asyncio.to_thread(db.ensure_user, interaction.user.id)
+
+        await interaction.response.send_message(
+            "Настрой свой профиль:",
+            view=ProfileEditView(interaction.user.id),
+            ephemeral=True
+        )
+
+
+    @profile_group.command(name="setgender", description="Установить пол")
+    @app_commands.describe(gender="male, female, other")
+    async def profile_set_gender(interaction: discord.Interaction, gender: str):
+        value = gender.lower().strip()
+
+        if value not in ("male", "female", "other"):
+            await interaction.response.send_message(
+                "❌ Доступные значения: `male`, `female`, `other`",
+                ephemeral=True
+            )
+            return
+
+        await asyncio.to_thread(db.set_gender, interaction.user.id, value)
+
+        gender_names = {
+            "male": "Мужской",
+            "female": "Женский",
+            "other": "Другое"
+        }
+
+        await interaction.response.send_message(
+            f"✅ Пол обновлён: **{gender_names[value]}**",
+            ephemeral=True
+        )
+
+
+    @profile_group.command(name="setage", description="Установить возраст")
+    async def profile_set_age(interaction: discord.Interaction, age: app_commands.Range[int, 10, 99]):
+        await asyncio.to_thread(db.set_age, interaction.user.id, age)
+        await interaction.response.send_message(
+            f"✅ Возраст обновлён: **{age}**",
+            ephemeral=True
+        )
+
+
+    @profile_group.command(name="setabout", description="Установить описание")
+    async def profile_set_about(interaction: discord.Interaction, text: app_commands.Range[str, 1, 300]):
+        await asyncio.to_thread(db.set_about, interaction.user.id, text.strip())
+        await interaction.response.send_message(
+            "✅ Описание профиля обновлено.",
+            ephemeral=True
+        )
+
+
+    @profile_group.command(name="events", description="Включить или выключить уведомления об ивентах")
+    async def profile_events(interaction: discord.Interaction, enabled: bool):
+        await asyncio.to_thread(db.set_event_ping, interaction.user.id, enabled)
+        await interaction.response.send_message(
+            "✅ Уведомления об ивентах включены." if enabled else "✅ Уведомления об ивентах выключены.",
+            ephemeral=True
+        )
+
+
+    @profile_group.command(name="clearabout", description="Очистить описание")
+    async def profile_clear_about(interaction: discord.Interaction):
+        await asyncio.to_thread(db.clear_about, interaction.user.id)
+        await interaction.response.send_message(
+            "✅ Описание профиля очищено.",
+            ephemeral=True
+        )
+
+
+    @profile_group.command(name="clearage", description="Очистить возраст")
+    async def profile_clear_age(interaction: discord.Interaction):
+        await asyncio.to_thread(db.clear_age, interaction.user.id)
+        await interaction.response.send_message(
+            "✅ Возраст очищен.",
+            ephemeral=True
+        )
+
+
+    @profile_group.command(name="cleargender", description="Очистить пол")
+    async def profile_clear_gender(interaction: discord.Interaction):
+        await asyncio.to_thread(db.clear_gender, interaction.user.id)
+        await interaction.response.send_message(
+            "✅ Пол очищен.",
+            ephemeral=True
+        )
+
+
+    bot.tree.add_command(profile_group)
+
+
     @ban_user.error
     @unban_user.error
     @mute_user.error

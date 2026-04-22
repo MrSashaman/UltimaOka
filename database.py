@@ -2,8 +2,6 @@ import sqlite3
 from datetime import datetime, timezone
 
 
-
-
 class Database:
     def __init__(self, db_path="users.db"):
         self.db_path = db_path
@@ -20,6 +18,10 @@ class Database:
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
                 balance INTEGER NOT NULL DEFAULT 0,
+                gender TEXT,
+                age INTEGER,
+                about TEXT,
+                event_ping INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -33,9 +35,9 @@ class Database:
         cursor = conn.cursor()
 
         cursor.execute("""
-            INSERT OR IGNORE INTO users (user_id, balance)
-            VALUES (?, ?)
-        """, (user_id, 0))
+            INSERT OR IGNORE INTO users (user_id, balance, event_ping)
+            VALUES (?, ?, ?)
+        """, (user_id, 0, 0))
 
         conn.commit()
         cursor.close()
@@ -46,9 +48,9 @@ class Database:
         cursor = conn.cursor()
 
         cursor.execute("""
-            INSERT OR IGNORE INTO users (user_id, balance)
-            VALUES (?, ?)
-        """, (user_id, 0))
+            INSERT OR IGNORE INTO users (user_id, balance, event_ping)
+            VALUES (?, ?, ?)
+        """, (user_id, 0, 0))
 
         cursor.execute("""
             UPDATE users
@@ -75,6 +77,126 @@ class Database:
 
         return row[0] if row else 0
 
+    def set_gender(self, user_id: int, gender: str | None):
+        conn = self._connect()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT OR IGNORE INTO users (user_id, balance, event_ping)
+            VALUES (?, ?, ?)
+        """, (user_id, 0, 0))
+
+        cursor.execute("""
+            UPDATE users
+            SET gender = ?
+            WHERE user_id = ?
+        """, (gender, user_id))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+    def set_age(self, user_id: int, age: int | None):
+        conn = self._connect()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT OR IGNORE INTO users (user_id, balance, event_ping)
+            VALUES (?, ?, ?)
+        """, (user_id, 0, 0))
+
+        cursor.execute("""
+            UPDATE users
+            SET age = ?
+            WHERE user_id = ?
+        """, (age, user_id))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+    def set_about(self, user_id: int, about: str | None):
+        conn = self._connect()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT OR IGNORE INTO users (user_id, balance, event_ping)
+            VALUES (?, ?, ?)
+        """, (user_id, 0, 0))
+
+        cursor.execute("""
+            UPDATE users
+            SET about = ?
+            WHERE user_id = ?
+        """, (about, user_id))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+    def set_event_ping(self, user_id: int, enabled: bool):
+        conn = self._connect()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT OR IGNORE INTO users (user_id, balance, event_ping)
+            VALUES (?, ?, ?)
+        """, (user_id, 0, 0))
+
+        cursor.execute("""
+            UPDATE users
+            SET event_ping = ?
+            WHERE user_id = ?
+        """, (1 if enabled else 0, user_id))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+    def get_profile(self, user_id: int) -> dict:
+        conn = self._connect()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT user_id, balance, gender, age, about, event_ping, created_at
+            FROM users
+            WHERE user_id = ?
+        """, (user_id,))
+
+        row = cursor.fetchone()
+
+        cursor.close()
+        conn.close()
+
+        if not row:
+            return {
+                "user_id": user_id,
+                "balance": 0,
+                "gender": None,
+                "age": None,
+                "about": None,
+                "event_ping": 0,
+                "created_at": None
+            }
+
+        return {
+            "user_id": row[0],
+            "balance": row[1],
+            "gender": row[2],
+            "age": row[3],
+            "about": row[4],
+            "event_ping": row[5],
+            "created_at": row[6]
+        }
+
+    def clear_gender(self, user_id: int):
+        self.set_gender(user_id, None)
+
+    def clear_age(self, user_id: int):
+        self.set_age(user_id, None)
+
+    def clear_about(self, user_id: int):
+        self.set_about(user_id, None)
 
 
 MOD_DB_PATH = "moderation.db"
