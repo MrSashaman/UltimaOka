@@ -48,6 +48,17 @@ def setup_commands(bot, db):
             else:
                 await interaction.response.send_message("❌ У вас недостаточно прав!", ephemeral=True)
 
+
+    @bot.tree.command(name="mrsashaman", description="mrsashaman?")
+    async def mrsashaman(interaction: discord.Interaction):
+        present = 1                       
+        user_id = interaction.user.id
+
+        await asyncio.to_thread(db.ensure_user, user_id)
+        await asyncio.to_thread(db.add_balance, user_id, present)
+  
+        await interaction.response.send_message(f"🤫`Тсс, это секретная команда. Вот тебе подарок от меня:` 🎁*{present}₵*")
+
     @bot.tree.command(name="adminsecurity", description="Подтверждение админ-прав")
     async def adminsecurity(interaction: discord.Interaction):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
