@@ -50,7 +50,7 @@ def setup_commands(bot, db):
             await bot.process_commands(message)
             return
 
-        forbidden_words = ["хуй", "пизда", "член", "dick", "трахать", "трахнул", "fuck", "пидор", "pidor", "еблан"]
+        forbidden_words = ["хуй", "пизда", "член", "dick", "трахать", "трахнул", "fuck", "пидор", "pidor", "еблан", "shit"]
 
         msg_content = message.content.lower()
         matched_word = next((word for word in forbidden_words if word in msg_content), None)
