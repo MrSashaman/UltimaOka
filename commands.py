@@ -5,6 +5,19 @@ from discord import app_commands, ui
 import SI
 import discord
 from discord import app_commands
+from role_shop import (
+    init_role_shop,
+    add_role_to_shop,
+    remove_role_from_shop,
+    remove_shop_listing,
+    get_shop_listing,
+    get_shop_role,
+    list_shop_roles,
+    add_role_to_user,
+    remove_role_from_user,
+    user_has_role,
+    list_user_roles,
+)
 
 from database import (
     create_mod_case,
@@ -19,9 +32,71 @@ from services import (
     reset_custom_status,
 )
 
+botversion = "0.2.1"
 
+init_role_shop()
 def setup_commands(bot, db):
 
+
+    @bot.event
+    async def on_message(message):
+        if message.author.bot:
+            return
+        if bot.user.mentioned_in(message):
+            await message.channel.send(f'# 👋Привет, {message.author.mention}! Я мультифункциональный дискорд бот.\n'
+                                       f'{message.author.mention}, Если нужна помощь по командам пропиши /help')
+
+        if message.guild is None:
+            await bot.process_commands(message)
+            return
+
+        forbidden_words = ["хуй", "пизда", "член", "dick", "трахать", "трахнул", "fuck", "пидор", "pidor", "еблан"]
+
+        msg_content = message.content.lower()
+        matched_word = next((word for word in forbidden_words if word in msg_content), None)
+
+        if matched_word:
+            reason = "Запрещённые слова"
+
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.NotFound):
+                pass
+
+            warn_id, created_at = await asyncio.to_thread(
+                add_warning_db,
+                message.guild.id,
+                message.author.id,
+                bot.user.id,
+                reason
+            )
+            case_id, _ = await asyncio.to_thread(
+                create_mod_case,
+                message.guild.id,
+                "WARN",
+                message.author.id,
+                bot.user.id,
+                reason
+            )
+
+            await message.channel.send(
+                f"{message.author.mention}, сообщение удалено из-за запрещённых слов. "
+                f"Выдано предупреждение `#{warn_id}`.",
+                delete_after=10
+            )
+
+            await send_mod_log(
+                message.guild,
+                "WARN",
+                bot.user,
+                message.author,
+                reason,
+                case_id,
+                created_at
+            )
+            return
+
+        await bot.process_commands(message)
 
     @bot.tree.command(name="setcustomstatus", description="Установить кастомный статус бота")
     @app_commands.checks.has_permissions(administrator=True)
@@ -48,16 +123,133 @@ def setup_commands(bot, db):
             else:
                 await interaction.response.send_message("❌ У вас недостаточно прав!", ephemeral=True)
 
+    @bot.tree.command(name="help", description="Посмотреть команды")
+    async def help(interaction: discord.Interaction):
+        help_categories = {
+            "economy": {
+                "label": "Экономика",
+                "emoji": "💶",
+                "color": discord.Color.gold(),
+                "commands": [
+                    ("💳 /balance", "Посмотреть свой или чужой баланс."),
+                    ("🪙 /bonus", "Получить бонус раз в час."),
+                    ("👷 /work", "Выбрать работу и попытаться получить зарплату."),
+                    ("🎲 /luckybet", "Сделать ставку."),
+                    ("🛒 /roleshop view", "Открыть магазин ролей сервера."),
+                    ("🎒 /roleshop inventory", "Открыть инвентарь купленных ролей."),
+                ]
+            },
+            "admin": {
+                "label": "Админские",
+                "emoji": "🛡️",
+                "color": discord.Color.red(),
+                "commands": [
+                    ("🛡️ /ban", "Забанить пользователя."),
+                    ("🔓 /unban", "Разбанить пользователя по ID."),
+                    ("🔇 /mute", "Выдать мут пользователю."),
+                    ("🔊 /unmute", "Снять мут с пользователя."),
+                    ("⚠️ /warn", "Выдать предупреждение."),
+                    ("📋 /warnings", "Посмотреть предупреждения пользователя."),
+                    ("⏳ /timeout", "Выдать таймаут пользователю."),
+                    ("🛒 /roleshop add", "Добавить роль в магазин сервера."),
+                    ("🗑️ /roleshop remove", "Убрать роль из магазина сервера."),
+                    ("🧪 /debug_info", "Показать debug-информацию сервера."),
+                ]
+            },
+            "fun": {
+                "label": "Фан",
+                "emoji": "🎉",
+                "color": discord.Color.purple(),
+                "commands": [
+                    ("🎬 /gif", "Случайная гифка."),
+                    ("🎲 /roll", "Случайное число."),
+                    ("🗾 /randomfact", "Случайный факт."),
+                    ("🤫 /mrsashaman", "Секретная команда."),
+                ]
+            },
+            "other": {
+                "label": "Прочее",
+                "emoji": "📦",
+                "color": discord.Color.blurple(),
+                "commands": [
+                    ("💻 /ping", "Проверить задержку бота."),
+                    ("🖼️ /getuseravatar", "Получить аватар пользователя."),
+                    ("📦 /adminsecurity", "Подтвердить админ-права."),
+                    ("📘 /profile view", "Посмотреть профиль."),
+                    ("✏️ /profile edit", "Редактировать профиль."),
+                    ("⚙️ /setcustomstatus", "Установить кастомный статус бота."),
+                ]
+            },
+        }
+
+        def build_help_embed(category_id: str) -> discord.Embed:
+            category = help_categories[category_id]
+            embed = discord.Embed(
+                title=f"{category['emoji']} {category['label']}",
+                description="Выбери раздел в списке ниже.",
+                color=category["color"]
+            )
+            for command_name, description in category["commands"]:
+                embed.add_field(name=command_name, value=description, inline=False)
+            embed.set_footer(text=f"Поддержка: mrsashaman | Версия бота: {botversion}")
+            return embed
+
+        class HelpCategorySelect(ui.Select):
+            def __init__(self):
+                options = [
+                    discord.SelectOption(
+                        label=category["label"],
+                        value=category_id,
+                        emoji=category["emoji"]
+                    )
+                    for category_id, category in help_categories.items()
+                ]
+                super().__init__(
+                    placeholder="Выбери раздел команд",
+                    min_values=1,
+                    max_values=1,
+                    options=options
+                )
+
+            async def callback(self, select_interaction: discord.Interaction):
+                await select_interaction.response.edit_message(
+                    embed=build_help_embed(self.values[0]),
+                    view=self.view
+                )
+
+        class HelpView(ui.View):
+            def __init__(self, author_id: int):
+                super().__init__(timeout=180)
+                self.author_id = author_id
+                self.add_item(HelpCategorySelect())
+
+            async def interaction_check(self, select_interaction: discord.Interaction):
+                if select_interaction.user.id != self.author_id:
+                    await select_interaction.response.send_message(
+                        "Это меню доступно только тому, кто вызвал /help.",
+                        ephemeral=True
+                    )
+                    return False
+                return True
+
+        await interaction.response.send_message(
+            embed=build_help_embed("economy"),
+            view=HelpView(interaction.user.id),
+            ephemeral=True
+        )
 
     @bot.tree.command(name="mrsashaman", description="mrsashaman?")
     async def mrsashaman(interaction: discord.Interaction):
-        present = 1                       
+        present = random.randint(0, 90)                       
         user_id = interaction.user.id
 
         await asyncio.to_thread(db.ensure_user, user_id)
         await asyncio.to_thread(db.add_balance, user_id, present)
-  
-        await interaction.response.send_message(f"🤫`Тсс, это секретная команда. Вот тебе подарок от меня:` 🎁*{present}₵*")
+
+        if present <= 90:
+            await interaction.response.send_message(f"`☹️Упс, mrSashaman не захотел давать тебе денег!`")
+        else:
+            await interaction.response.send_message(f"🤫`Тсс, это секретная команда. Вот тебе подарок от меня:` 🎁*{present}₵*")
 
     @bot.tree.command(name="adminsecurity", description="Подтверждение админ-прав")
     async def adminsecurity(interaction: discord.Interaction):
@@ -144,6 +336,328 @@ def setup_commands(bot, db):
 
 
 
+    def can_bot_manage_role(guild: discord.Guild, role: discord.Role) -> tuple[bool, str]:
+        bot_member = guild.me or guild.get_member(bot.user.id)
+        if role == guild.default_role:
+            return False, "Нельзя продавать роль @everyone."
+        if role.managed:
+            return False, "Этой ролью управляет интеграция Discord."
+        if bot_member and role >= bot_member.top_role:
+            return False, "Роль должна быть ниже роли бота в списке ролей сервера."
+        return True, ""
+
+    def build_shop_embed(guild: discord.Guild, rows: list[tuple[int, int, int, int]]) -> discord.Embed:
+        embed = discord.Embed(
+            title="Магазин ролей",
+            description="Выбери роль в меню ниже, чтобы купить её.",
+            color=discord.Color.green()
+        )
+        if not rows:
+            embed.description = "Магазин ролей пока пустой."
+            return embed
+
+        for _listing_id, role_id, price, seller_id in rows[:25]:
+            role = guild.get_role(role_id)
+            if not role:
+                continue
+            seller = "Сервер"
+            if seller_id:
+                member = guild.get_member(seller_id)
+                seller = member.display_name if member else f"<@{seller_id}>"
+            embed.add_field(
+                name=f"{role.name} - {price}₵",
+                value=f"Продавец: {seller}",
+                inline=False
+            )
+        if not embed.fields:
+            embed.description = "Магазин ролей пока пустой."
+        return embed
+
+    def build_inventory_embed(member: discord.Member, roles: list[discord.Role]) -> discord.Embed:
+        embed = discord.Embed(
+            title="Инвентарь ролей",
+            description="Выбери роль в меню ниже, чтобы экипировать, убрать или продать её.",
+            color=discord.Color.blurple()
+        )
+        if not roles:
+            embed.description = "В инвентаре пока нет купленных ролей."
+            return embed
+
+        for role in roles[:25]:
+            equipped = "экипирована" if role in member.roles else "убрана"
+            embed.add_field(name=role.name, value=equipped, inline=False)
+        return embed
+
+    class SellRoleModal(ui.Modal, title="Продать роль"):
+        price = ui.TextInput(
+            label="Цена роли",
+            placeholder="Введите цену в ₵",
+            required=True,
+            max_length=8
+        )
+
+        def __init__(self, role: discord.Role, guild_id: int, user: discord.Member):
+            super().__init__()
+            self.role = role
+            self.guild_id = guild_id
+            self.user = user
+
+        async def on_submit(self, interaction: discord.Interaction):
+            if not self.price.value.isdigit():
+                await interaction.response.send_message("Введите цену числом.", ephemeral=True)
+                return
+
+            price = int(self.price.value)
+            if price <= 0:
+                await interaction.response.send_message("Цена должна быть больше нуля.", ephemeral=True)
+                return
+
+            existing_listing = await get_shop_role(self.guild_id, self.role.id, self.user.id)
+            if existing_listing:
+                await interaction.response.send_message("Ты уже выставил эту роль в магазин.", ephemeral=True)
+                return
+
+            try:
+                if self.role in self.user.roles:
+                    await self.user.remove_roles(self.role, reason="Role shop sale")
+            except discord.Forbidden:
+                await interaction.response.send_message("Не могу снять эту роль. Проверь права и иерархию ролей.", ephemeral=True)
+                return
+
+            await remove_role_from_user(self.user.id, self.role.id, self.guild_id)
+            await add_role_to_shop(self.guild_id, self.role.id, price, self.user.id)
+            await interaction.response.send_message(
+                f"Роль **{self.role.name}** выставлена на продажу за {price}₵.",
+                ephemeral=True
+            )
+
+    class RoleShopSelect(ui.Select):
+        def __init__(self, guild: discord.Guild, rows: list[tuple[int, int, int, int]]):
+            options = []
+            for listing_id, role_id, price, seller_id in rows[:25]:
+                role = guild.get_role(role_id)
+                if not role:
+                    continue
+                seller = "Сервер" if not seller_id else f"Продавец: {seller_id}"
+                options.append(discord.SelectOption(
+                    label=role.name[:100],
+                    value=str(listing_id),
+                    description=f"{price}₵ | {seller}"[:100]
+                ))
+            super().__init__(placeholder="Выбери роль для покупки", options=options)
+
+        async def callback(self, interaction: discord.Interaction):
+            guild = interaction.guild
+            if guild is None or not isinstance(interaction.user, discord.Member):
+                await interaction.response.send_message("Команда доступна только на сервере.", ephemeral=True)
+                return
+
+            listing_id = int(self.values[0])
+            listing = await get_shop_listing(listing_id)
+            if not listing:
+                await interaction.response.send_message("Эта роль уже не продаётся.", ephemeral=True)
+                return
+
+            _, listing_guild_id, role_id, price, seller_id = listing
+            if listing_guild_id != guild.id:
+                await interaction.response.send_message("Это объявление относится к другому серверу.", ephemeral=True)
+                return
+
+            role = guild.get_role(role_id)
+            if not role:
+                await remove_shop_listing(listing_id)
+                await interaction.response.send_message("Роль не найдена и удалена из магазина.", ephemeral=True)
+                return
+
+            allowed, reason = can_bot_manage_role(guild, role)
+            if not allowed:
+                await interaction.response.send_message(reason, ephemeral=True)
+                return
+
+            if seller_id == interaction.user.id:
+                await interaction.response.send_message("Нельзя купить свою же роль.", ephemeral=True)
+                return
+
+            if await user_has_role(interaction.user.id, role_id, guild.id):
+                await interaction.response.send_message("Эта роль уже есть в твоём инвентаре.", ephemeral=True)
+                return
+
+            balance = await asyncio.to_thread(db.get_balance, interaction.user.id)
+            if balance < price:
+                await interaction.response.send_message(f"Недостаточно денег. Баланс: {balance}₵.", ephemeral=True)
+                return
+
+            try:
+                await interaction.user.add_roles(role, reason="Role shop purchase")
+            except discord.Forbidden:
+                await interaction.response.send_message("Не могу выдать эту роль. Проверь права и иерархию ролей.", ephemeral=True)
+                return
+
+            await asyncio.to_thread(db.add_balance, interaction.user.id, -price)
+            if seller_id:
+                await asyncio.to_thread(db.add_balance, seller_id, price)
+                await remove_shop_listing(listing_id)
+            await add_role_to_user(interaction.user.id, role_id, guild.id)
+
+            seller_text = f" Деньги получил <@{seller_id}>." if seller_id else ""
+            await interaction.response.send_message(
+                f"Куплена роль **{role.name}** за {price}₵.{seller_text}",
+                ephemeral=True
+            )
+
+    class RoleShopView(ui.View):
+        def __init__(self, guild: discord.Guild, user: discord.Member, rows: list[tuple[int, int, int, int]]):
+            super().__init__(timeout=180)
+            self.user = user
+            valid_rows = [row for row in rows if guild.get_role(row[1])]
+            if valid_rows:
+                self.add_item(RoleShopSelect(guild, valid_rows))
+
+        async def interaction_check(self, interaction: discord.Interaction):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("Эта панель доступна только тебе.", ephemeral=True)
+                return False
+            return True
+
+    class InventoryRoleSelect(ui.Select):
+        def __init__(self, roles: list[discord.Role]):
+            options = [
+                discord.SelectOption(label=role.name[:100], value=str(role.id))
+                for role in roles[:25]
+            ]
+            super().__init__(placeholder="Выбери роль из инвентаря", options=options)
+
+        async def callback(self, interaction: discord.Interaction):
+            view: InventoryView = self.view
+            view.selected_role_id = int(self.values[0])
+            for item in view.children:
+                if isinstance(item, ui.Button):
+                    item.disabled = False
+            await interaction.response.edit_message(view=view)
+
+    class InventoryView(ui.View):
+        def __init__(self, guild: discord.Guild, user: discord.Member, roles: list[discord.Role]):
+            super().__init__(timeout=180)
+            self.guild = guild
+            self.user = user
+            self.selected_role_id: int | None = None
+            if roles:
+                self.add_item(InventoryRoleSelect(roles))
+
+        async def interaction_check(self, interaction: discord.Interaction):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("Этот инвентарь доступен только тебе.", ephemeral=True)
+                return False
+            return True
+
+        def selected_role(self) -> discord.Role | None:
+            if self.selected_role_id is None:
+                return None
+            return self.guild.get_role(self.selected_role_id)
+
+        @ui.button(label="Экипировать", style=discord.ButtonStyle.success, disabled=True)
+        async def equip_role(self, interaction: discord.Interaction, button: ui.Button):
+            role = self.selected_role()
+            if not role:
+                await interaction.response.send_message("Роль не найдена.", ephemeral=True)
+                return
+            try:
+                await self.user.add_roles(role, reason="Role shop inventory equip")
+            except discord.Forbidden:
+                await interaction.response.send_message("Не могу выдать эту роль. Проверь права и иерархию ролей.", ephemeral=True)
+                return
+            await interaction.response.send_message(f"Роль **{role.name}** экипирована.", ephemeral=True)
+
+        @ui.button(label="Убрать", style=discord.ButtonStyle.secondary, disabled=True)
+        async def unequip_role(self, interaction: discord.Interaction, button: ui.Button):
+            role = self.selected_role()
+            if not role:
+                await interaction.response.send_message("Роль не найдена.", ephemeral=True)
+                return
+            try:
+                if role in self.user.roles:
+                    await self.user.remove_roles(role, reason="Role shop inventory unequip")
+            except discord.Forbidden:
+                await interaction.response.send_message("Не могу снять эту роль. Проверь права и иерархию ролей.", ephemeral=True)
+                return
+            await interaction.response.send_message(f"Роль **{role.name}** убрана.", ephemeral=True)
+
+        @ui.button(label="Продать", style=discord.ButtonStyle.danger, disabled=True)
+        async def sell_role(self, interaction: discord.Interaction, button: ui.Button):
+            role = self.selected_role()
+            if not role:
+                await interaction.response.send_message("Роль не найдена.", ephemeral=True)
+                return
+            await interaction.response.send_modal(SellRoleModal(role, self.guild.id, self.user))
+
+    roleshop_group = app_commands.Group(name="roleshop", description="Магазин ролей")
+
+    @roleshop_group.command(name="view", description="Открыть магазин ролей")
+    async def roleshop_view(interaction: discord.Interaction):
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        rows = await list_shop_roles(interaction.guild.id)
+        embed = build_shop_embed(interaction.guild, rows)
+        view = RoleShopView(interaction.guild, interaction.user, rows)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @roleshop_group.command(name="inventory", description="Открыть инвентарь купленных ролей")
+    async def roleshop_inventory(interaction: discord.Interaction):
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        role_ids = await list_user_roles(interaction.user.id, interaction.guild.id)
+        roles = [role for role_id in role_ids if (role := interaction.guild.get_role(role_id))]
+        embed = build_inventory_embed(interaction.user, roles)
+        view = InventoryView(interaction.guild, interaction.user, roles)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @roleshop_group.command(name="add", description="Добавить роль в магазин сервера")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def roleshop_add(
+        interaction: discord.Interaction,
+        role: discord.Role,
+        price: app_commands.Range[int, 1, 99999999]
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message("Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        allowed, reason = can_bot_manage_role(interaction.guild, role)
+        if not allowed:
+            await interaction.response.send_message(reason, ephemeral=True)
+            return
+
+        await add_role_to_shop(interaction.guild.id, role.id, price, 0)
+        await interaction.response.send_message(
+            f"Роль **{role.name}** добавлена в магазин за {price}₵.",
+            ephemeral=True
+        )
+
+    @roleshop_group.command(name="remove", description="Убрать роль из магазина сервера")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def roleshop_remove(interaction: discord.Interaction, role: discord.Role):
+        if interaction.guild is None:
+            await interaction.response.send_message("Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        await remove_role_from_shop(interaction.guild.id, role.id)
+        await interaction.response.send_message(f"Роль **{role.name}** убрана из магазина.", ephemeral=True)
+
+    @roleshop_add.error
+    @roleshop_remove.error
+    async def roleshop_admin_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("Нужны права администратора.", ephemeral=True)
+            return
+        raise error
+
+    bot.tree.add_command(roleshop_group)
+
+
     @bot.tree.command(name="balance", description="Посмотреть баланс")
     async def balance(interaction: discord.Interaction, member: discord.Member | None = None):
         target = member or interaction.user
@@ -183,25 +697,154 @@ def setup_commands(bot, db):
                     ephemeral=True
                 )
 
-    @bot.tree.command(name="work", description="Выйти на работу и получить зарплату")
+    @bot.tree.command(name="work", description="Выбрать работу и попытаться получить зарплату")
     @app_commands.checks.cooldown(1, 3600)
     async def work(interaction: discord.Interaction):
-        salary = random.randint(50, 250)
-        jobs = [
-            "Поваром",
-            "Пожарным",
-            "Программистом",
-            "Охранником",
-            "Президентом",
-            "Гражданином Чехословакии",
-            "Главой Евро-Коммисии"
-        ]
-        job = random.choice(jobs)
+        jobs = {
+            "cook": {
+                "name": "Повар",
+                "emoji": "🍳",
+                "salary": (60, 140),
+                "success_chance": 90,
+                "success": "Смена прошла спокойно, гости сыты, касса довольна.",
+                "fail": "Заказов было слишком много, смена сорвалась."
+            },
+            "guard": {
+                "name": "Охранник",
+                "emoji": "🛡️",
+                "salary": (80, 170),
+                "success_chance": 82,
+                "success": "Ты отстоял смену без происшествий.",
+                "fail": "Ты уснул на посту, премию не дали."
+            },
+            "programmer": {
+                "name": "Программист",
+                "emoji": "💻",
+                "salary": (120, 260),
+                "success_chance": 72,
+                "success": "Код собрался, заказчик оплатил работу.",
+                "fail": "Баг оказался хитрее дедлайна, оплаты сегодня нет."
+            },
+            "firefighter": {
+                "name": "Пожарный",
+                "emoji": "🚒",
+                "salary": (140, 300),
+                "success_chance": 64,
+                "success": "Вызов закрыт, город спасён, зарплата начислена.",
+                "fail": "Смена была тяжёлой, но оплачиваемого вызова не досталось."
+            },
+            "stalker": {
+                "name": "Сталкер",
+                "emoji": "☢️",
+                "salary": (220, 520),
+                "success_chance": 42,
+                "success": "Ты вернулся с редкой находкой и выгодно её продал.",
+                "fail": "Добычи нет, зато есть история, которую лучше не рассказывать."
+            },
+            "cosmonaut": {
+                "name": "Космонавт",
+                "emoji": "🚀",
+                "salary": (300, 700),
+                "success_chance": 30,
+                "success": "Миссия прошла успешно, гонорар внушительный.",
+                "fail": "Запуск перенесли, выплаты тоже."
+            },
+            "europeanunionleader": {
+                "name": "Глава ЕС",
+                "emoji": "🌍",
+                "salary": (1, 1000),
+                "success_chance": 15,
+                "success": "Ода к радости ведёт!",
+                "fail": "Ода к радости ведёт!"
+            },
+            
+        }
 
-        await asyncio.to_thread(db.add_balance, interaction.user.id, salary)
+        def build_work_embed() -> discord.Embed:
+            embed = discord.Embed(
+                title="👷 Выбор работы",
+                description="Выбери работу снизу. Чем выше награда, тем больше шанс ничего не получить.",
+                color=discord.Color.orange()
+            )
+            for job in jobs.values():
+                min_salary, max_salary = job["salary"]
+                embed.add_field(
+                    name=f"{job['emoji']} {job['name']}",
+                    value=f"Зарплата: `{min_salary}-{max_salary}₵`\nШанс успеха: `{job['success_chance']}%`",
+                    inline=True
+                )
+            return embed
+
+        class WorkSelect(ui.Select):
+            def __init__(self):
+                options = []
+                for job_id, job in jobs.items():
+                    min_salary, max_salary = job["salary"]
+                    options.append(discord.SelectOption(
+                        label=job["name"],
+                        value=job_id,
+                        emoji=job["emoji"],
+                        description=f"{min_salary}-{max_salary}₵ | шанс {job['success_chance']}%"
+                    ))
+                super().__init__(
+                    placeholder="Выбери работу",
+                    min_values=1,
+                    max_values=1,
+                    options=options
+                )
+
+            async def callback(self, select_interaction: discord.Interaction):
+                view: WorkView = self.view
+                if view.completed:
+                    await select_interaction.response.send_message(
+                        "Эта смена уже завершена.",
+                        ephemeral=True
+                    )
+                    return
+
+                view.completed = True
+                job = jobs[self.values[0]]
+                min_salary, max_salary = job["salary"]
+                success = random.randint(1, 100) <= job["success_chance"]
+
+                self.disabled = True
+                if success:
+                    salary = random.randint(min_salary, max_salary)
+                    await asyncio.to_thread(db.add_balance, select_interaction.user.id, salary)
+                    embed = discord.Embed(
+                        title=f"{job['emoji']} Работа выполнена",
+                        description=f"{job['success']}\n\nПолучено: `{salary}₵`",
+                        color=discord.Color.green()
+                    )
+                else:
+                    embed = discord.Embed(
+                        title=f"{job['emoji']} Работа провалена",
+                        description=f"{job['fail']}\n\nПолучено: `0₵`",
+                        color=discord.Color.red()
+                    )
+
+                await select_interaction.response.edit_message(embed=embed, view=view)
+
+        class WorkView(ui.View):
+            def __init__(self, author_id: int):
+                super().__init__(timeout=120)
+                self.author_id = author_id
+                self.completed = False
+                self.add_item(WorkSelect())
+
+            async def interaction_check(self, select_interaction: discord.Interaction):
+                if select_interaction.user.id != self.author_id:
+                    await select_interaction.response.send_message(
+                        "Это меню работы доступно только тому, кто вызвал команду.",
+                        ephemeral=True
+                    )
+                    return False
+                return True
 
         await interaction.response.send_message(
-            f"👷 Ты поработал **{job}** и получил: `{salary}`₵\n"
+            embed=build_work_embed(),
+            view=WorkView(interaction.user.id),
+            ephemeral=True
         )
 
     @work.error
