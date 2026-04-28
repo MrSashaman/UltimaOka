@@ -1,44 +1,152 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bot Dashboard</title>
-    <link rel="stylesheet" href="css\styles.css">
+    <title>UltimaOka Dashboard</title>
+    <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
     <div class="dashboard-container">
         <aside class="sidebar">
-            <h2>Bot Panel</h2>
+            <h2>UltimaOka</h2>
             <nav>
                 <ul>
-                    <li><a href="#" class="active">Dashboard</a></li>
-                    <li><a href="#">Analytics</a></li>
-                    <li><a href="#">Users</a></li>
-                    <li><a href="#">Settings</a></li>
+                    <li><a href="#dashboard" class="active" data-section-link="dashboard">Dashboard</a></li>
+                    <li><a href="#settings" data-section-link="settings">Settings</a></li>
                 </ul>
             </nav>
         </aside>
 
         <main class="main-content">
-            <header class="top-header">
-                <h1>Welcome Back, Admin</h1>
-                <div class="user-profile">Profile</div>
-            </header>
+            <section class="page-section active" id="dashboardSection">
+                <header class="top-header">
+                    <div>
+                        <h1>Bot Dashboard</h1>
+                        <p id="botName">Loading bot...</p>
+                    </div>
+                    <div class="user-profile" id="botStatus">Starting</div>
+                </header>
 
+                <section class="stats-grid">
+                    <div class="card" data-card="totalUsers">
+                        <h3>Total Bot Users</h3>
+                        <p id="totalUsers">0</p>
+                    </div>
+                    <div class="card" data-card="memberCount">
+                        <h3>Discord Members</h3>
+                        <p id="memberCount">0</p>
+                    </div>
+                    <div class="card" data-card="serverCount">
+                        <h3>Servers</h3>
+                        <p id="serverCount">0</p>
+                    </div>
+                    <div class="card" data-card="commandCount">
+                        <h3>Commands</h3>
+                        <p id="commandCount">0</p>
+                    </div>
+                    <div class="card" data-card="latency">
+                        <h3>Ping</h3>
+                        <p id="latency">0 ms</p>
+                    </div>
+                    <div class="card" data-card="eventSubscribers">
+                        <h3>Event Subscribers</h3>
+                        <p id="eventSubscribers">0</p>
+                    </div>
+                </section>
 
-
-            <section class="stats-grid">
-                <div class="card">
-                    <h3>Total bot users</h3>
-                    <p id="RandomNum">0</p>
+                <div class="actions">
+                    <button class="btn-primary" id="myButton">Refresh Stats</button>
+                    <a class="btn-secondary" id="downloadDevRaw" href="/api/devraw" download>Download DevRaw</a>
                 </div>
-                <div class="card"><h3>Active Users</h3><p>0</p></div>
-                <div class="card"><h3>Servers</h3><p>1</p></div>
+                <p id="message">Waiting for data...</p>
             </section>
 
-            <button class="btn-primary" id="myButton">Начать</button>
-            <p id="message"></p>
+            <section class="page-section" id="settingsSection">
+                <header class="top-header">
+                    <div>
+                        <h1>Settings</h1>
+                        <p>Dashboard preferences are saved in this browser.</p>
+                    </div>
+                    <button class="btn-secondary" id="resetSettings">Reset</button>
+                </header>
+
+                <div class="settings-grid">
+                    <div class="settings-panel">
+                        <h2>Theme</h2>
+                        <div class="theme-options">
+                            <button class="theme-option" data-theme-option="light">
+                                <span class="theme-swatch theme-light"></span>
+                                White
+                            </button>
+                            <button class="theme-option" data-theme-option="dark">
+                                <span class="theme-swatch theme-dark"></span>
+                                Black
+                            </button>
+                            <button class="theme-option" data-theme-option="nature">
+                                <span class="theme-swatch theme-nature"></span>
+                                Nature
+                            </button>
+                            <button class="theme-option" data-theme-option="moon">
+                                <span class="theme-swatch theme-moon"></span>
+                                Moon
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="settings-panel">
+                        <h2>Behavior</h2>
+                        <label class="setting-row" for="refreshInterval">
+                            <span>Auto refresh</span>
+                            <select id="refreshInterval">
+                                <option value="0">Off</option>
+                                <option value="3000">3 seconds</option>
+                                <option value="5000">5 seconds</option>
+                                <option value="10000">10 seconds</option>
+                                <option value="30000">30 seconds</option>
+                            </select>
+                        </label>
+                        <label class="setting-toggle">
+                            <input type="checkbox" id="compactMode">
+                            <span>Compact cards</span>
+                        </label>
+                        <label class="setting-toggle">
+                            <input type="checkbox" id="showDevRaw">
+                            <span>Show DevRaw download</span>
+                        </label>
+                    </div>
+
+                    <div class="settings-panel settings-panel-wide">
+                        <h2>Visible Cards</h2>
+                        <div class="checkbox-grid">
+                            <label class="setting-toggle">
+                                <input type="checkbox" data-card-toggle="totalUsers">
+                                <span>Total Bot Users</span>
+                            </label>
+                            <label class="setting-toggle">
+                                <input type="checkbox" data-card-toggle="memberCount">
+                                <span>Discord Members</span>
+                            </label>
+                            <label class="setting-toggle">
+                                <input type="checkbox" data-card-toggle="serverCount">
+                                <span>Servers</span>
+                            </label>
+                            <label class="setting-toggle">
+                                <input type="checkbox" data-card-toggle="commandCount">
+                                <span>Commands</span>
+                            </label>
+                            <label class="setting-toggle">
+                                <input type="checkbox" data-card-toggle="latency">
+                                <span>Ping</span>
+                            </label>
+                            <label class="setting-toggle">
+                                <input type="checkbox" data-card-toggle="eventSubscribers">
+                                <span>Event Subscribers</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
     <script src="dashboard.js"></script>

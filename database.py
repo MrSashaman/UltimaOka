@@ -77,6 +77,30 @@ class Database:
 
         return row[0] if row else 0
 
+    def count_users(self) -> int:
+        conn = self._connect()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM users")
+        row = cursor.fetchone()
+
+        cursor.close()
+        conn.close()
+
+        return row[0] if row else 0
+
+    def count_event_ping_users(self) -> int:
+        conn = self._connect()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM users WHERE event_ping = 1")
+        row = cursor.fetchone()
+
+        cursor.close()
+        conn.close()
+
+        return row[0] if row else 0
+
     def set_gender(self, user_id: int, gender: str | None):
         conn = self._connect()
         cursor = conn.cursor()

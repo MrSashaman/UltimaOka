@@ -4,6 +4,7 @@ from discord.ext import commands
 import SI
 from database import Database, init_mod_db
 from commands import setup_commands
+from dashboard_api import setup_dashboard_api
 from services import setup_status_tasks
 
 
@@ -21,6 +22,7 @@ async def on_ready():
     init_mod_db()
 
     setup_status_tasks(bot)
+    await setup_dashboard_api(bot, db)
 
     try:
         synced = await bot.tree.sync()
