@@ -5,6 +5,15 @@ from discord import app_commands, ui
 import SI
 import discord
 from discord import app_commands
+from automod import (
+    add_automod_word,
+    get_automod_settings,
+    init_automod_db,
+    list_automod_words,
+    remove_automod_word,
+    run_automod,
+    update_automod_settings,
+)
 from role_shop import (
     init_role_shop,
     add_role_to_shop,
@@ -35,6 +44,7 @@ from services import (
 botversion = "0.2.1"
 
 init_role_shop()
+init_automod_db()
 def setup_commands(bot, db):
 
 
@@ -46,54 +56,12 @@ def setup_commands(bot, db):
             await message.channel.send(f'# 👋Привет, {message.author.mention}! Я мультифункциональный дискорд бот.\n'
                                        f'{message.author.mention}, Если нужна помощь по командам пропиши /help')
 
+
         if message.guild is None:
             await bot.process_commands(message)
             return
 
-        forbidden_words = ["хуй", "пизда", "член", "dick", "трахать", "трахнул", "fuck", "пидор", "pidor", "еблан", "shit", "ебать" ]
-
-        msg_content = message.content.lower()
-        matched_word = next((word for word in forbidden_words if word in msg_content), None)
-
-        if matched_word:
-            reason = "Запрещённые слова"
-
-            try:
-                await message.delete()
-            except (discord.Forbidden, discord.NotFound):
-                pass
-
-            warn_id, created_at = await asyncio.to_thread(
-                add_warning_db,
-                message.guild.id,
-                message.author.id,
-                bot.user.id,
-                reason
-            )
-            case_id, _ = await asyncio.to_thread(
-                create_mod_case,
-                message.guild.id,
-                "WARN",
-                message.author.id,
-                bot.user.id,
-                reason
-            )
-
-            await message.channel.send(
-                f"{message.author.mention}, сообщение удалено из-за запрещённых слов. "
-                f"Выдано предупреждение `#{warn_id}`.",
-                delete_after=10
-            )
-
-            await send_mod_log(
-                message.guild,
-                "WARN",
-                bot.user,
-                message.author,
-                reason,
-                case_id,
-                created_at
-            )
+        if await run_automod(bot, message):
             return
 
         await bot.process_commands(message)
@@ -123,6 +91,178 @@ def setup_commands(bot, db):
             else:
                 await interaction.response.send_message("❌ У вас недостаточно прав!", ephemeral=True)
 
+    automod_group = app_commands.Group(name="automod", description="Настройки AutoMod")
+
+    def build_automod_embed(guild_id: int) -> discord.Embed:
+        settings = get_automod_settings(guild_id)
+        words_count = len(list_automod_words(guild_id))
+
+        embed = discord.Embed(
+            title="AutoMod",
+            description="Текущие настройки автоматической модерации.",
+            color=discord.Color.green() if settings.enabled else discord.Color.dark_grey()
+        )
+        embed.add_field(name="Статус", value="Включён" if settings.enabled else "Выключен", inline=True)
+        embed.add_field(name="Удаление", value="Да" if settings.delete_messages else "Нет", inline=True)
+        embed.add_field(name="Warn", value="Да" if settings.warn_users else "Нет", inline=True)
+        embed.add_field(name="Invite-ссылки", value="Блокируются" if settings.block_invites else "Разрешены", inline=True)
+        embed.add_field(name="Обычные ссылки", value="Блокируются" if settings.block_links else "Разрешены", inline=True)
+        embed.add_field(name="Слов в фильтре", value=str(words_count), inline=True)
+        embed.add_field(name="Упоминания", value=f"до {settings.max_mentions}", inline=True)
+        embed.add_field(
+            name="Капс",
+            value=f"от {settings.caps_min_length} букв и {settings.caps_percent}%",
+            inline=True
+        )
+        embed.add_field(
+            name="Спам",
+            value=f"{settings.spam_max_messages} сообщений / {settings.spam_window_seconds} сек.",
+            inline=True
+        )
+        embed.add_field(
+            name="Авто-timeout",
+            value=f"после {settings.timeout_after_warns} warn на {settings.timeout_minutes} мин.",
+            inline=False
+        )
+        return embed
+
+    @automod_group.command(name="status", description="Показать настройки AutoMod")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def automod_status(interaction: discord.Interaction):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        embed = await asyncio.to_thread(build_automod_embed, interaction.guild.id)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @automod_group.command(name="toggle", description="Включить или выключить AutoMod")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def automod_toggle(interaction: discord.Interaction, enabled: bool):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        await asyncio.to_thread(update_automod_settings, interaction.guild.id, enabled=enabled)
+        await interaction.response.send_message(
+            "✅ AutoMod включён." if enabled else "✅ AutoMod выключен.",
+            ephemeral=True
+        )
+
+    @automod_group.command(name="settings", description="Изменить правила AutoMod")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(
+        delete_messages="Удалять сообщения-нарушения",
+        warn_users="Выдавать предупреждения",
+        block_invites="Блокировать Discord invite-ссылки",
+        block_links="Блокировать обычные ссылки",
+        max_mentions="Максимум упоминаний в сообщении",
+        spam_max_messages="Максимум сообщений в окне антиспама",
+        spam_window_seconds="Окно антиспама в секундах",
+        caps_percent="Процент капса для срабатывания",
+        timeout_after_warns="После скольких warn выдавать timeout, 0 = выключить",
+        timeout_minutes="Длительность авто-timeout в минутах"
+    )
+    async def automod_settings(
+        interaction: discord.Interaction,
+        delete_messages: bool | None = None,
+        warn_users: bool | None = None,
+        block_invites: bool | None = None,
+        block_links: bool | None = None,
+        max_mentions: app_commands.Range[int, 1, 50] | None = None,
+        spam_max_messages: app_commands.Range[int, 2, 30] | None = None,
+        spam_window_seconds: app_commands.Range[int, 3, 120] | None = None,
+        caps_percent: app_commands.Range[int, 50, 100] | None = None,
+        timeout_after_warns: app_commands.Range[int, 0, 20] | None = None,
+        timeout_minutes: app_commands.Range[int, 1, 40320] | None = None
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        values = {
+            "delete_messages": delete_messages,
+            "warn_users": warn_users,
+            "block_invites": block_invites,
+            "block_links": block_links,
+            "max_mentions": max_mentions,
+            "spam_max_messages": spam_max_messages,
+            "spam_window_seconds": spam_window_seconds,
+            "caps_percent": caps_percent,
+            "timeout_after_warns": timeout_after_warns,
+            "timeout_minutes": timeout_minutes,
+        }
+
+        if all(value is None for value in values.values()):
+            await interaction.response.send_message(
+                "❌ Укажи хотя бы одну настройку для изменения.",
+                ephemeral=True
+            )
+            return
+
+        await asyncio.to_thread(update_automod_settings, interaction.guild.id, **values)
+        embed = await asyncio.to_thread(build_automod_embed, interaction.guild.id)
+        await interaction.response.send_message("✅ Настройки AutoMod обновлены.", embed=embed, ephemeral=True)
+
+    @automod_group.command(name="word_add", description="Добавить слово в фильтр AutoMod")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def automod_word_add(interaction: discord.Interaction, word: app_commands.Range[str, 1, 60]):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        await asyncio.to_thread(add_automod_word, interaction.guild.id, word)
+        await interaction.response.send_message(f"✅ Слово `{word.lower().strip()}` добавлено в AutoMod.", ephemeral=True)
+
+    @automod_group.command(name="word_remove", description="Удалить слово из фильтра AutoMod")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def automod_word_remove(interaction: discord.Interaction, word: app_commands.Range[str, 1, 60]):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        deleted = await asyncio.to_thread(remove_automod_word, interaction.guild.id, word)
+        if deleted:
+            await interaction.response.send_message(f"✅ Слово `{word.lower().strip()}` удалено из AutoMod.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Такого слова нет в фильтре.", ephemeral=True)
+
+    @automod_group.command(name="words", description="Показать слова из фильтра AutoMod")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def automod_words(interaction: discord.Interaction):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        words = await asyncio.to_thread(list_automod_words, interaction.guild.id)
+        visible_words = ", ".join(f"`{word}`" for word in words[:60])
+        if len(words) > 60:
+            visible_words += f"\nи ещё {len(words) - 60}..."
+
+        await interaction.response.send_message(
+            visible_words or "Фильтр слов пуст.",
+            ephemeral=True
+        )
+
+    @automod_status.error
+    @automod_toggle.error
+    @automod_settings.error
+    @automod_word_add.error
+    @automod_word_remove.error
+    @automod_words.error
+    async def automod_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            text = "❌ Нужны права `Управлять сервером`."
+        else:
+            text = f"❌ Ошибка AutoMod: {error}"
+
+        if interaction.response.is_done():
+            await interaction.followup.send(text, ephemeral=True)
+        else:
+            await interaction.response.send_message(text, ephemeral=True)
+
+    bot.tree.add_command(automod_group)
+
     @bot.tree.command(name="help", description="Посмотреть команды")
     async def help(interaction: discord.Interaction):
         help_categories = {
@@ -151,6 +291,9 @@ def setup_commands(bot, db):
                     ("⚠️ /warn", "Выдать предупреждение."),
                     ("📋 /warnings", "Посмотреть предупреждения пользователя."),
                     ("⏳ /timeout", "Выдать таймаут пользователю."),
+                    ("🤖 /automod status", "Посмотреть настройки AutoMod."),
+                    ("🤖 /automod settings", "Изменить правила AutoMod."),
+                    ("🧹 /automod words", "Показать слова из фильтра AutoMod."),
                     ("🛒 /roleshop add", "Добавить роль в магазин сервера."),
                     ("🗑️ /roleshop remove", "Убрать роль из магазина сервера."),
                     ("🧪 /debug_info", "Показать debug-информацию сервера."),

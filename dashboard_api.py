@@ -7,6 +7,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from automod import AUTOMOD_DB_PATH
 from database import MOD_DB_PATH
 from role_shop import ROLE_DB_PATH
 
@@ -220,6 +221,7 @@ async def setup_dashboard_api(bot, db, host: str = "127.0.0.1", port: int = 8080
                 "users": _dump_sqlite_database(db.db_path),
                 "moderation": _dump_sqlite_database(MOD_DB_PATH),
                 "role_shop": _dump_sqlite_database(ROLE_DB_PATH),
+                "automod": _dump_sqlite_database(AUTOMOD_DB_PATH),
             },
             "runtime": {
                 "python": sys.version,
