@@ -14,6 +14,15 @@ from automod import (
     run_automod,
     update_automod_settings,
 )
+from ai_chat import (
+    add_ai_chat_channel,
+    clear_ai_chat_history,
+    init_ai_chat_db,
+    is_ai_chat_channel,
+    list_ai_chat_channels,
+    remove_ai_chat_channel,
+    run_ai_chat,
+)
 from role_shop import (
     init_role_shop,
     add_role_to_shop,
@@ -45,6 +54,7 @@ botversion = "0.2.1"
 
 init_role_shop()
 init_automod_db()
+init_ai_chat_db()
 def setup_commands(bot, db):
 
 
@@ -52,7 +62,16 @@ def setup_commands(bot, db):
     async def on_message(message):
         if message.author.bot:
             return
-        if bot.user.mentioned_in(message):
+
+        ai_chat_enabled = False
+        if message.guild is not None:
+            ai_chat_enabled = await asyncio.to_thread(
+                is_ai_chat_channel,
+                message.guild.id,
+                message.channel.id
+            )
+
+        if bot.user.mentioned_in(message) and not ai_chat_enabled:
             await message.channel.send(f'# 👋Привет, {message.author.mention}! Я мультифункциональный дискорд бот.\n'
                                        f'{message.author.mention}, Если нужна помощь по командам пропиши /help')
 
@@ -62,6 +81,9 @@ def setup_commands(bot, db):
             return
 
         if await run_automod(bot, message):
+            return
+
+        if await run_ai_chat(bot, message):
             return
 
         await bot.process_commands(message)
@@ -263,6 +285,122 @@ def setup_commands(bot, db):
 
     bot.tree.add_command(automod_group)
 
+    aichat_group = app_commands.Group(name="aichat", description="Настройки нейросеть-чата")
+
+    @aichat_group.command(name="enable", description="Включить нейросеть-чат в канале")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def aichat_enable(
+        interaction: discord.Interaction,
+        channel: discord.TextChannel | None = None
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        target_channel = channel or interaction.channel
+        if not isinstance(target_channel, discord.TextChannel):
+            await interaction.response.send_message("❌ Выбери текстовый канал.", ephemeral=True)
+            return
+
+        await asyncio.to_thread(
+            add_ai_chat_channel,
+            interaction.guild.id,
+            target_channel.id,
+            interaction.user.id
+        )
+        await interaction.response.send_message(
+            f"✅ Нейросеть-чат включён в канале {target_channel.mention}.",
+            ephemeral=True
+        )
+
+    @aichat_group.command(name="disable", description="Выключить нейросеть-чат в канале")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def aichat_disable(
+        interaction: discord.Interaction,
+        channel: discord.TextChannel | None = None
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        target_channel = channel or interaction.channel
+        if not isinstance(target_channel, discord.TextChannel):
+            await interaction.response.send_message("❌ Выбери текстовый канал.", ephemeral=True)
+            return
+
+        deleted = await asyncio.to_thread(remove_ai_chat_channel, interaction.guild.id, target_channel.id)
+        if deleted:
+            await interaction.response.send_message(
+                f"✅ Нейросеть-чат выключен в канале {target_channel.mention}.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"ℹ️ В канале {target_channel.mention} нейросеть-чат уже выключен.",
+                ephemeral=True
+            )
+
+    @aichat_group.command(name="list", description="Показать каналы с нейросеть-чатом")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def aichat_list(interaction: discord.Interaction):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        channel_ids = await asyncio.to_thread(list_ai_chat_channels, interaction.guild.id)
+        if not channel_ids:
+            await interaction.response.send_message("Нейросеть-чат пока не включён ни в одном канале.", ephemeral=True)
+            return
+
+        channels = "\n".join(f"• <#{channel_id}>" for channel_id in channel_ids[:30])
+        if len(channel_ids) > 30:
+            channels += f"\n...и ещё {len(channel_ids) - 30}"
+
+        embed = discord.Embed(
+            title="Каналы нейросеть-чата",
+            description=channels,
+            color=discord.Color.blurple()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @aichat_group.command(name="clear_history", description="Очистить память нейросеть-чата")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def aichat_clear_history(
+        interaction: discord.Interaction,
+        channel: discord.TextChannel | None = None
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ Команда доступна только на сервере.", ephemeral=True)
+            return
+
+        target_channel = channel or interaction.channel
+        if not isinstance(target_channel, discord.TextChannel):
+            await interaction.response.send_message("❌ Выбери текстовый канал.", ephemeral=True)
+            return
+
+        clear_ai_chat_history(interaction.guild.id, target_channel.id)
+        await interaction.response.send_message(
+            f"✅ Память нейросеть-чата очищена для канала {target_channel.mention}.",
+            ephemeral=True
+        )
+
+    @aichat_enable.error
+    @aichat_disable.error
+    @aichat_list.error
+    @aichat_clear_history.error
+    async def aichat_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            text = "❌ Нужны права администратора."
+        else:
+            text = f"❌ Ошибка нейросеть-чата: {error}"
+
+        if interaction.response.is_done():
+            await interaction.followup.send(text, ephemeral=True)
+        else:
+            await interaction.response.send_message(text, ephemeral=True)
+
+    bot.tree.add_command(aichat_group)
+
     @bot.tree.command(name="help", description="Посмотреть команды")
     async def help(interaction: discord.Interaction):
         help_categories = {
@@ -294,6 +432,9 @@ def setup_commands(bot, db):
                     ("🤖 /automod status", "Посмотреть настройки AutoMod."),
                     ("🤖 /automod settings", "Изменить правила AutoMod."),
                     ("🧹 /automod words", "Показать слова из фильтра AutoMod."),
+                    ("🧠 /aichat enable", "Включить нейросеть-чат в выбранном канале."),
+                    ("🧠 /aichat disable", "Выключить нейросеть-чат в выбранном канале."),
+                    ("🧠 /aichat list", "Показать каналы с нейросеть-чатом."),
                     ("🛒 /roleshop add", "Добавить роль в магазин сервера."),
                     ("🗑️ /roleshop remove", "Убрать роль из магазина сервера."),
                     ("🧪 /debug_info", "Показать debug-информацию сервера."),
